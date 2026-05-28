@@ -23,6 +23,8 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
+#include <filesystem>
+#include <iostream>
 
 using namespace vsql;
 
@@ -118,6 +120,25 @@ schema::MySQLSchema parseSchema(std::string_view schema_str) {
 }
 
 schema::MySQLSchema getSchemaFromMySQL(std::string_view db_name, std::string& err_msg) {
+    std::string db_str(db_name);
+    // Secure input validation: database name must be alphanumeric or underscores
+    if (db_str.empty() || db_str.length() > 64) {
+        err_msg = "Invalid database name length";
+        return schema::MySQLSchema();
+    }
+    for (char c : db_str) {
+        if (!std::isalnum(c) && c != '_') {
+            err_msg = "Invalid characters in database name";
+            return schema::MySQLSchema();
+        }
+    }
+
+    // Check if the database directory exists under the data directory
+    if (!std::filesystem::is_directory(db_str)) {
+        err_msg = "Database '" + db_str + "' does not exist";
+        return schema::MySQLSchema();
+    }
+
     void *thd = thd_get_current_thd();
     if (!thd) {
         err_msg = "No current THD context available in this thread";
@@ -135,11 +156,22 @@ schema::MySQLSchema getSchemaFromMySQL(std::string_view db_name, std::string& er
         return schema::MySQLSchema();
     }
 
-    std::string db_str(db_name);
     std::string escaped_db;
     for (char c : db_str) {
         if (c == '\'') escaped_db += "\\'";
         else escaped_db += c;
+    }
+
+    // Check if the database exists
+    std::string check_sql = "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '" + escaped_db + "'";
+    auto check_result = session.sql(check_sql).execute();
+    if (!check_result || check_result.has_error()) {
+        err_msg = "SQL Query failed: " + std::string(check_result ? check_result.error().message : "unknown error");
+        return schema::MySQLSchema();
+    }
+    if (!check_result.next()) {
+        err_msg = "Database '" + db_str + "' does not exist";
+        return schema::MySQLSchema();
     }
 
     std::string sql = "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_KEY "
@@ -257,12 +289,15 @@ void vsql_corrupt_impl(StringArg query, StringArg corruption_type, StringArg sch
         return;
     }
 
+    std::string query_val(query.value());
+    std::string schema_or_db_val(schema_or_db.value());
+    std::string corruption_type_val = corruption_type.is_null() ? "" : std::string(corruption_type.value());
+
     // Determine corruption type
     CorruptionEngine::CorruptionType type = getRandomCorruptionType();
-    if (!corruption_type.is_null()) {
-        std::string_view type_str = corruption_type.value();
-        if (type_str != "RANDOM" && !type_str.empty()) {
-            auto parsed_type = parseCorruptionType(type_str);
+    if (!corruption_type_val.empty()) {
+        if (corruption_type_val != "RANDOM") {
+            auto parsed_type = parseCorruptionType(corruption_type_val);
             if (!parsed_type) {
                 out.error("Invalid corruption type specified");
                 return;
@@ -273,14 +308,14 @@ void vsql_corrupt_impl(StringArg query, StringArg corruption_type, StringArg sch
 
     // Determine schema
     std::string err_msg;
-    schema::MySQLSchema schemaObj = resolveSchema(schema_or_db.value(), err_msg);
+    schema::MySQLSchema schemaObj = resolveSchema(schema_or_db_val, err_msg);
     if (!err_msg.empty()) {
         out.error(err_msg.c_str());
         return;
     }
 
     CorruptionEngine engine(schemaObj);
-    std::string corrupted = engine.applyCorruption(std::string(query.value()), type);
+    std::string corrupted = engine.applyCorruption(query_val, type);
 
     auto buf = out.buffer();
     if (corrupted.length() > buf.size()) {
@@ -298,11 +333,14 @@ void vsql_corrupt_with_schema_impl(StringArg query, StringArg corruption_type, S
         return;
     }
 
+    std::string query_val(query.value());
+    std::string schema_or_db_val(schema_or_db.value());
+    std::string corruption_type_val = corruption_type.is_null() ? "" : std::string(corruption_type.value());
+
     CorruptionEngine::CorruptionType type = getRandomCorruptionType();
-    if (!corruption_type.is_null()) {
-        std::string_view type_str = corruption_type.value();
-        if (type_str != "RANDOM" && !type_str.empty()) {
-            auto parsed_type = parseCorruptionType(type_str);
+    if (!corruption_type_val.empty()) {
+        if (corruption_type_val != "RANDOM") {
+            auto parsed_type = parseCorruptionType(corruption_type_val);
             if (!parsed_type) {
                 out.error("Invalid corruption type specified");
                 return;
@@ -312,14 +350,14 @@ void vsql_corrupt_with_schema_impl(StringArg query, StringArg corruption_type, S
     }
 
     std::string err_msg;
-    schema::MySQLSchema schemaObj = resolveSchema(schema_or_db.value(), err_msg);
+    schema::MySQLSchema schemaObj = resolveSchema(schema_or_db_val, err_msg);
     if (!err_msg.empty()) {
         out.error(err_msg.c_str());
         return;
     }
 
     CorruptionEngine engine(schemaObj);
-    std::string corrupted = engine.applyCorruption(std::string(query.value()), type);
+    std::string corrupted = engine.applyCorruption(query_val, type);
 
     auto buf = out.buffer();
     if (corrupted.length() > buf.size()) {

@@ -1,11 +1,8 @@
-# Enable the Preview Tier
-SET PERSIST vsql_allow_preview_extensions = ON;
-
 # Install extension
 INSTALL EXTENSION vsql_corruptor;
 
 --echo #
---echo # Setup test database and tables for dynamic schema resolution
+--echo # Setup test database and tables
 --echo #
 CREATE DATABASE test_corrupt_db;
 USE test_corrupt_db;
@@ -24,17 +21,17 @@ CREATE TABLE orders (
 );
 
 --echo #
---echo # Test basic vsql_corrupt function using database name for schema lookup
+--echo # Test basic vsql_corrupt function using explicit schema strings
 --echo #
 
-# Test 1: vsql_corrupt using database name 'test_corrupt_db' (specific type)
-SELECT vsql_corrupt('SELECT first_name, last_name FROM customers WHERE id = 30', 'COMPARISON_OPERATOR_SWAP', 'test_corrupt_db') AS db_comparison_swap;
+# Test 1: vsql_corrupt using explicit schema string (specific type)
+SELECT vsql_corrupt('SELECT first_name, last_name FROM customers WHERE id = 30', 'COMPARISON_OPERATOR_SWAP', 'customers:first_name VARCHAR,last_name VARCHAR,id INT') AS db_comparison_swap;
 
-# Test 2: vsql_corrupt using database name (random type)
-SELECT LENGTH(vsql_corrupt('SELECT first_name, last_name FROM customers WHERE id = 30', 'RANDOM', 'test_corrupt_db')) > 0 AS has_random_output;
+# Test 2: vsql_corrupt using explicit schema string (random type)
+SELECT LENGTH(vsql_corrupt('SELECT first_name, last_name FROM customers WHERE id = 30', 'RANDOM', 'customers:first_name VARCHAR,last_name VARCHAR,id INT')) > 0 AS has_random_output;
 
-# Test 3: vsql_corrupt using database name (type incompatibility)
-SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'test_corrupt_db') AS db_type_swap;
+# Test 3: vsql_corrupt using explicit schema string (type incompatibility)
+SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS db_type_swap;
 
 --echo #
 --echo # Test basic vsql_corrupt function using explicit schema string
@@ -43,14 +40,14 @@ SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice
 # Test 4: vsql_corrupt using explicit schema string (specific type)
 SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap;
 
-# Test 5: vsql_corrupt_with_schema using database name
-SELECT vsql_corrupt_with_schema('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'test_corrupt_db') AS custom_schema_swap_explicit_db;
+# Test 5: vsql_corrupt_with_schema using explicit schema string
+SELECT vsql_corrupt_with_schema('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap_explicit_db;
 
 # Test 6: invalid inputs and error handling
 --error 3200
-SELECT vsql_corrupt('SELECT name FROM users', 'INVALID_TYPE_NAME', 'test_corrupt_db');
+SELECT vsql_corrupt('SELECT name FROM users', 'INVALID_TYPE_NAME', 'customers:first_name VARCHAR,id INT');
 
-# Test 7: invalid database name
+# Test 7: invalid database name (verifies the existence check)
 --error 3200
 SELECT vsql_corrupt('SELECT name FROM users', 'RANDOM', 'non_existent_db');
 

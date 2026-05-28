@@ -1,22 +1,48 @@
 INSTALL EXTENSION vsql_corruptor;
 #
-# Test basic vsql_corrupt function
+# Setup test database and tables
 #
-SELECT vsql_corrupt('SELECT name, age FROM users WHERE age = 30', 'COMPARISON_OPERATOR_SWAP') AS comparison_swap;
-comparison_swap
-SELECT name, age FROM users WHERE (age != 30)
-SELECT LENGTH(vsql_corrupt('SELECT name, age FROM users WHERE age = 30')) > 0 AS has_random_output;
+CREATE DATABASE test_corrupt_db;
+USE test_corrupt_db;
+CREATE TABLE customers (
+id INT PRIMARY KEY,
+first_name VARCHAR(50),
+last_name VARCHAR(50)
+);
+CREATE TABLE orders (
+id INT PRIMARY KEY,
+customer_id INT,
+order_date DATE,
+amount DECIMAL(10,2)
+);
+#
+# Test basic vsql_corrupt function using explicit schema strings
+#
+SELECT vsql_corrupt('SELECT first_name, last_name FROM customers WHERE id = 30', 'COMPARISON_OPERATOR_SWAP', 'customers:first_name VARCHAR,last_name VARCHAR,id INT') AS db_comparison_swap;
+db_comparison_swap
+SELECT first_name, last_name FROM customers WHERE (id != 30)
+SELECT LENGTH(vsql_corrupt('SELECT first_name, last_name FROM customers WHERE id = 30', 'RANDOM', 'customers:first_name VARCHAR,last_name VARCHAR,id INT')) > 0 AS has_random_output;
 has_random_output
 1
+SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS db_type_swap;
+db_type_swap
+SELECT first_name FROM customers WHERE (first_name = 1234)
+#
+# Test basic vsql_corrupt function using explicit schema string
+#
 SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap;
 custom_schema_swap
 SELECT first_name FROM customers WHERE (first_name = 1234)
-SELECT vsql_corrupt_with_schema('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap_explicit;
-custom_schema_swap_explicit
+SELECT vsql_corrupt_with_schema('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap_explicit_db;
+custom_schema_swap_explicit_db
 SELECT first_name FROM customers WHERE (first_name = 1234)
-SELECT vsql_corrupt('SELECT name FROM users', 'INVALID_TYPE_NAME');
+SELECT vsql_corrupt('SELECT name FROM users', 'INVALID_TYPE_NAME', 'customers:first_name VARCHAR,id INT');
 ERROR HY000: VDF error in function 'vsql_corrupt': Invalid corruption type specified
+SELECT vsql_corrupt('SELECT name FROM users', 'RANDOM', 'non_existent_db');
+ERROR HY000: VDF error in function 'vsql_corrupt': Database 'non_existent_db' does not exist
 #
 # Cleanup
 #
+DROP DATABASE test_corrupt_db;
+USE test;
 UNINSTALL EXTENSION vsql_corruptor;
