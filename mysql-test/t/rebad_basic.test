@@ -1,0 +1,29 @@
+# Install extension
+INSTALL EXTENSION vsql_rebad;
+
+--echo #
+--echo # Test basic rebad_corrupt function
+--echo #
+
+# Test 1: rebad_corrupt with 2 arguments (specific type)
+SELECT rebad_corrupt('SELECT name, age FROM users WHERE age = 30', 'COMPARISON_OPERATOR_SWAP') AS comparison_swap;
+
+# Test 2: rebad_corrupt with 1 argument (random type, check output is generated)
+SELECT LENGTH(rebad_corrupt('SELECT name, age FROM users WHERE age = 30')) > 0 AS has_random_output;
+
+# Test 3: rebad_corrupt with 3 arguments (custom schema, specific type)
+SELECT rebad_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap;
+
+# Test 4: rebad_corrupt_with_schema with 3 arguments
+SELECT rebad_corrupt_with_schema('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap_explicit;
+
+# Test 5: invalid inputs and error handling
+--error 3200
+SELECT rebad_corrupt('SELECT name FROM users', 'INVALID_TYPE_NAME');
+
+--echo #
+--echo # Cleanup
+--echo #
+
+# Uninstall extension
+UNINSTALL EXTENSION vsql_rebad;

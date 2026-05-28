@@ -1,0 +1,22 @@
+INSTALL EXTENSION vsql_rebad;
+#
+# Test basic rebad_corrupt function
+#
+SELECT rebad_corrupt('SELECT name, age FROM users WHERE age = 30', 'COMPARISON_OPERATOR_SWAP') AS comparison_swap;
+comparison_swap
+SELECT name, age FROM users WHERE (age != 30)
+SELECT LENGTH(rebad_corrupt('SELECT name, age FROM users WHERE age = 30')) > 0 AS has_random_output;
+has_random_output
+1
+SELECT rebad_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap;
+custom_schema_swap
+SELECT first_name FROM customers WHERE (first_name = 1234)
+SELECT rebad_corrupt_with_schema('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap_explicit;
+custom_schema_swap_explicit
+SELECT first_name FROM customers WHERE (first_name = 1234)
+SELECT rebad_corrupt('SELECT name FROM users', 'INVALID_TYPE_NAME');
+ERROR HY000: VDF error in function 'rebad_corrupt': Invalid corruption type specified
+#
+# Cleanup
+#
+UNINSTALL EXTENSION vsql_rebad;

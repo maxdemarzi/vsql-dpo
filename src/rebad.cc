@@ -142,22 +142,103 @@ schema::MySQLSchema getDefaultSchema() {
     return schema::MySQLSchema{{usersTable, ordersTable, itemsTable}};
 }
 
+CorruptionEngine::CorruptionType getRandomCorruptionType() {
+    static const std::vector<CorruptionEngine::CorruptionType> allTypes = {
+        CorruptionEngine::CorruptionType::WRONG_JOIN_KEY,
+        CorruptionEngine::CorruptionType::MISSING_GROUP_BY,
+        CorruptionEngine::CorruptionType::HALLUCINATED_COLUMN,
+        CorruptionEngine::CorruptionType::AGGREGATE_MISUSE,
+        CorruptionEngine::CorruptionType::ALIAS_SHADOWING,
+        CorruptionEngine::CorruptionType::INVALID_NESTING,
+        CorruptionEngine::CorruptionType::TYPE_INCOMPATIBILITY,
+        CorruptionEngine::CorruptionType::COMPARISON_WITH_NULL,
+        CorruptionEngine::CorruptionType::NON_BOOLEAN_WHERE,
+        CorruptionEngine::CorruptionType::JOIN_ON_TRUE,
+        CorruptionEngine::CorruptionType::WRONG_AGGREGATION,
+        CorruptionEngine::CorruptionType::JOIN_TYPE_MUTATION,
+        CorruptionEngine::CorruptionType::LOGICAL_OPERATOR_SWAP,
+        CorruptionEngine::CorruptionType::COMPARISON_OPERATOR_SWAP,
+        CorruptionEngine::CorruptionType::UNNECESSARY_JOIN,
+        CorruptionEngine::CorruptionType::WILDCARD_HALLUCINATION,
+        CorruptionEngine::CorruptionType::DISTINCT_MUTATION,
+        CorruptionEngine::CorruptionType::HAVING_CLAUSE_MUTATION,
+        CorruptionEngine::CorruptionType::ORDER_BY_DIRECTION_SWAP,
+        CorruptionEngine::CorruptionType::MISSING_WHERE_CLAUSE,
+        CorruptionEngine::CorruptionType::LIMIT_MUTATION,
+        CorruptionEngine::CorruptionType::MATH_OPERATOR_SWAP,
+        CorruptionEngine::CorruptionType::LIKE_TO_EQUALS_SWAP,
+        CorruptionEngine::CorruptionType::UNION_ALL_MUTATION,
+        CorruptionEngine::CorruptionType::IN_TO_EQUALS,
+        CorruptionEngine::CorruptionType::IS_NULL_INVERSION,
+        CorruptionEngine::CorruptionType::BETWEEN_REVERSAL,
+        CorruptionEngine::CorruptionType::EXISTS_INVERSION,
+        CorruptionEngine::CorruptionType::STRING_FUNCTION_MUTATION,
+        CorruptionEngine::CorruptionType::IN_INVERSION,
+        CorruptionEngine::CorruptionType::OUTER_JOIN_DIRECTION_SWAP,
+        CorruptionEngine::CorruptionType::AGGREGATE_DISTINCT_MUTATION,
+        CorruptionEngine::CorruptionType::OFFSET_MUTATION,
+        CorruptionEngine::CorruptionType::SET_OPERATION_SWAP,
+        CorruptionEngine::CorruptionType::CASE_CONDITION_SWAP
+    };
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, allTypes.size() - 1);
+    return allTypes[dis(gen)];
+}
+
 } // namespace
 
-void rebad_corrupt_impl(StringArg query, StringArg corruption_type, StringResult out) {
-    if (query.is_null() || corruption_type.is_null()) {
+void rebad_corrupt_impl(VarArgs args, StringResult out) {
+    if (args.size() < 1 || args.size() > 3) {
+        out.error("rebad_corrupt expects between 1 and 3 arguments: query, [corruption_type], [schema]");
+        return;
+    }
+
+    if (args[0].is_null()) {
         out.set_null();
         return;
     }
 
-    auto type = parseCorruptionType(corruption_type.value());
-    if (!type) {
-        out.error("Invalid corruption type specified");
+    if (!args[0].is_str()) {
+        out.error("First argument to rebad_corrupt must be a query string");
         return;
     }
+    std::string_view query = args[0].as_str();
 
-    CorruptionEngine engine(getDefaultSchema());
-    std::string corrupted = engine.applyCorruption(std::string(query.value()), *type);
+    // Determine corruption type
+    CorruptionEngine::CorruptionType type = getRandomCorruptionType();
+    if (args.size() >= 2) {
+        if (!args[1].is_null()) {
+            if (!args[1].is_str()) {
+                out.error("Second argument (corruption type) must be a string");
+                return;
+            }
+            std::string_view type_str = args[1].as_str();
+            if (type_str != "RANDOM" && !type_str.empty()) {
+                auto parsed_type = parseCorruptionType(type_str);
+                if (!parsed_type) {
+                    out.error("Invalid corruption type specified");
+                    return;
+                }
+                type = *parsed_type;
+            }
+        }
+    }
+
+    // Determine schema
+    schema::MySQLSchema schemaObj = getDefaultSchema();
+    if (args.size() >= 3) {
+        if (!args[2].is_null()) {
+            if (!args[2].is_str()) {
+                out.error("Third argument (schema) must be a string");
+                return;
+            }
+            schemaObj = parseSchema(args[2].as_str());
+        }
+    }
+
+    CorruptionEngine engine(schemaObj);
+    std::string corrupted = engine.applyCorruption(std::string(query), type);
 
     auto buf = out.buffer();
     if (corrupted.length() > buf.size()) {
@@ -170,20 +251,27 @@ void rebad_corrupt_impl(StringArg query, StringArg corruption_type, StringResult
 }
 
 void rebad_corrupt_with_schema_impl(StringArg query, StringArg corruption_type, StringArg schema_str, StringResult out) {
-    if (query.is_null() || corruption_type.is_null() || schema_str.is_null()) {
+    if (query.is_null() || schema_str.is_null()) {
         out.set_null();
         return;
     }
 
-    auto type = parseCorruptionType(corruption_type.value());
-    if (!type) {
-        out.error("Invalid corruption type specified");
-        return;
+    CorruptionEngine::CorruptionType type = getRandomCorruptionType();
+    if (!corruption_type.is_null()) {
+        std::string_view type_str = corruption_type.value();
+        if (type_str != "RANDOM" && !type_str.empty()) {
+            auto parsed_type = parseCorruptionType(type_str);
+            if (!parsed_type) {
+                out.error("Invalid corruption type specified");
+                return;
+            }
+            type = *parsed_type;
+        }
     }
 
     schema::MySQLSchema schemaObj = parseSchema(schema_str.value());
     CorruptionEngine engine(schemaObj);
-    std::string corrupted = engine.applyCorruption(std::string(query.value()), *type);
+    std::string corrupted = engine.applyCorruption(std::string(query.value()), type);
 
     auto buf = out.buffer();
     if (corrupted.length() > buf.size()) {
@@ -199,8 +287,7 @@ VEF_GENERATE_ENTRY_POINTS(
   make_extension()
     .func(make_func<&rebad_corrupt_impl>("rebad_corrupt")
       .returns(STRING)
-      .param(STRING)
-      .param(STRING)
+      .varargs()
       .buffer_size(65535)
       .build())
     .func(make_func<&rebad_corrupt_with_schema_impl>("rebad_corrupt_with_schema")
@@ -211,3 +298,4 @@ VEF_GENERATE_ENTRY_POINTS(
       .buffer_size(65535)
       .build())
 )
+
