@@ -14,24 +14,24 @@
  * along with this program; if not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <villagesql/vsql.h>
+#ifndef REBAD_SQL_UNPARSER_H
+#define REBAD_SQL_UNPARSER_H
 
-#include <cstring>
+#include <string>
+#include <vector>
+#include "SQLParser.h"
 
-using namespace vsql;
+class SQLUnparser {
+public:
+    static std::string toString(const hsql::SQLStatement* stmt);
+    static std::string selectToString(const hsql::SelectStatement* select);
+    static std::string exprToString(const hsql::Expr* expr);
+    static std::string tableRefToString(const hsql::TableRef* table);
+    static std::string joinToString(const hsql::JoinDefinition* join);
 
-void hello_world_impl(StringResult out) {
-  const char* hello = "Hello, World!";
-  auto buf = out.buffer();
-  memcpy(buf.data(), hello, strlen(hello));
-  out.set_length(strlen(hello));
-}
+private:
+    static std::string exprListToString(const std::vector<hsql::Expr*>* list, const std::string& sep);
+    static std::string opToString(const hsql::Expr* expr);
+};
 
-VEF_GENERATE_ENTRY_POINTS(
-  make_extension()
-    .func(make_func<&hello_world_impl>("hello_world")
-      .returns(STRING)
-      .no_params()
-      .buffer_size(14)
-      .build())
-)
+#endif // REBAD_SQL_UNPARSER_H

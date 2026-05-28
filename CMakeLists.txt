@@ -14,13 +14,49 @@
 # along with this program; if not, see <https://www.gnu.org/licenses/>.
 
 cmake_minimum_required(VERSION 3.18)
-project(vsql_extension_template)
+project(vsql_rebad)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Extension name
-set(EXTENSION_NAME "vsql_extension_template")
+set(EXTENSION_NAME "vsql_rebad")
+
+# Configure FetchContent to download hyrise/sql-parser
+include(FetchContent)
+FetchContent_Declare(
+  hyrise_sql_parser
+  GIT_REPOSITORY https://github.com/hyrise/sql-parser.git
+  GIT_TAG        main
+)
+
+# Fetch dependency
+FetchContent_GetProperties(hyrise_sql_parser)
+if(NOT hyrise_sql_parser_POPULATED)
+  FetchContent_Populate(hyrise_sql_parser)
+endif()
+
+# Compile hyrise/sql-parser as a static library
+add_library(sqlparser STATIC
+  ${hyrise_sql_parser_SOURCE_DIR}/src/SQLParser.cpp
+  ${hyrise_sql_parser_SOURCE_DIR}/src/SQLParserResult.cpp
+  ${hyrise_sql_parser_SOURCE_DIR}/src/parser/bison_parser.cpp
+  ${hyrise_sql_parser_SOURCE_DIR}/src/parser/flex_lexer.cpp
+  ${hyrise_sql_parser_SOURCE_DIR}/src/sql/CreateStatement.cpp
+  ${hyrise_sql_parser_SOURCE_DIR}/src/sql/Expr.cpp
+  ${hyrise_sql_parser_SOURCE_DIR}/src/sql/PrepareStatement.cpp
+  ${hyrise_sql_parser_SOURCE_DIR}/src/sql/SQLStatement.cpp
+  ${hyrise_sql_parser_SOURCE_DIR}/src/sql/statements.cpp
+)
+
+target_include_directories(sqlparser PUBLIC
+  ${hyrise_sql_parser_SOURCE_DIR}/src
+)
+
+# Disable warnings in fetched dependency to keep output clean
+if(NOT MSVC)
+  target_compile_options(sqlparser PRIVATE -w)
+endif()
 
 # Find VillageSQL SDK
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -29,19 +65,26 @@ find_package(VillageSQL REQUIRED)
 message(STATUS "VillageSQL SDK found at: ${VillageSQL_PREFIX}")
 message(STATUS "VillageSQL include dir: ${VillageSQL_INCLUDE_DIR}")
 
-# Create the hello world shared library
-add_library(hello SHARED
-    src/hello.cc
+# Create the rebad shared library
+add_library(rebad SHARED
+    src/rebad.cc
+    src/CorruptionEngine.cpp
+    src/SQLUnparser.cpp
 )
 
 # Include directories
-target_include_directories(hello PRIVATE
+target_include_directories(rebad PRIVATE
     ${VillageSQLExtensionFramework_INCLUDE_DIR}
+    ${hyrise_sql_parser_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+
+# Link dependencies
+target_link_libraries(rebad PRIVATE sqlparser)
 
 # Create the VEB package
 VEF_CREATE_VEB(
     NAME ${EXTENSION_NAME}
-    LIBRARY_TARGET hello
+    LIBRARY_TARGET rebad
     MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/manifest.json
 )
