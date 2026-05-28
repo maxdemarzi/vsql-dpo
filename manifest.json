@@ -1,7 +1,7 @@
 {
-  "name": "vsql_rebad",
+  "name": "vsql_corruptor",
   "version": "1.0.0",
-  "description": "ReBad SQL Query Corruption Engine Extension for VillageSQL",
+  "description": "vsql-corruptor SQL Query Corruption Engine Extension for VillageSQL",
   "author": "Max De Marzi",
   "license": "GPL-2.0"
 }

@@ -14,14 +14,14 @@
 # along with this program; if not, see <https://www.gnu.org/licenses/>.
 
 cmake_minimum_required(VERSION 3.18)
-project(vsql_rebad)
+project(vsql_corruptor)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Extension name
-set(EXTENSION_NAME "vsql_rebad")
+set(EXTENSION_NAME "vsql_corruptor")
 
 # Configure FetchContent to download hyrise/sql-parser
 include(FetchContent)
@@ -66,26 +66,26 @@ find_package(VillageSQL REQUIRED)
 message(STATUS "VillageSQL SDK found at: ${VillageSQL_PREFIX}")
 message(STATUS "VillageSQL include dir: ${VillageSQL_INCLUDE_DIR}")
 
-# Create the rebad shared library
-add_library(rebad SHARED
-    src/rebad.cc
+# Create the vsql_corruptor shared library
+add_library(vsql_corruptor SHARED
+    src/vsql_corruptor.cc
     src/CorruptionEngine.cpp
     src/SQLUnparser.cpp
 )
 
 # Include directories
-target_include_directories(rebad PRIVATE
+target_include_directories(vsql_corruptor PRIVATE
     ${VillageSQLExtensionFramework_INCLUDE_DIR}
     ${hyrise_sql_parser_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 # Link dependencies
-target_link_libraries(rebad PRIVATE sqlparser)
+target_link_libraries(vsql_corruptor PRIVATE sqlparser)
 
 # Create the VEB package
 VEF_CREATE_VEB(
     NAME ${EXTENSION_NAME}
-    LIBRARY_TARGET rebad
+    LIBRARY_TARGET vsql_corruptor
     MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/manifest.json
 )

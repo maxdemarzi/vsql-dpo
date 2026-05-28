@@ -1,0 +1,22 @@
+INSTALL EXTENSION vsql_corruptor;
+#
+# Test basic vsql_corrupt function
+#
+SELECT vsql_corrupt('SELECT name, age FROM users WHERE age = 30', 'COMPARISON_OPERATOR_SWAP') AS comparison_swap;
+comparison_swap
+SELECT name, age FROM users WHERE (age != 30)
+SELECT LENGTH(vsql_corrupt('SELECT name, age FROM users WHERE age = 30')) > 0 AS has_random_output;
+has_random_output
+1
+SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap;
+custom_schema_swap
+SELECT first_name FROM customers WHERE (first_name = 1234)
+SELECT vsql_corrupt_with_schema('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap_explicit;
+custom_schema_swap_explicit
+SELECT first_name FROM customers WHERE (first_name = 1234)
+SELECT vsql_corrupt('SELECT name FROM users', 'INVALID_TYPE_NAME');
+ERROR HY000: VDF error in function 'vsql_corrupt': Invalid corruption type specified
+#
+# Cleanup
+#
+UNINSTALL EXTENSION vsql_corruptor;

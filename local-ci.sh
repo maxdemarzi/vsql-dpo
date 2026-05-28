@@ -38,7 +38,7 @@ cd "$EXTENSION_DIR/build"
 cmake .. -DVillageSQL_BUILD_DIR="$VILLAGESQL_BUILD_DIR" -DVillageSQL_USE_DEV_HEADERS=ON 2>&1 | tail -5
 make -j"$JOBS" 2>&1 | tail -5
 
-VEB_FILE="$EXTENSION_DIR/build/vsql_rebad.veb"
+VEB_FILE="$EXTENSION_DIR/build/vsql_corruptor.veb"
 [ -f "$VEB_FILE" ] || { log "ERROR: $VEB_FILE not found after build"; exit 1; }
 
 mkdir -p "$VEB_DIR"

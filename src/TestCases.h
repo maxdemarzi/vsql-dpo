@@ -14,8 +14,8 @@
  * along with this program; if not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef REBAD_TEST_CASES_H
-#define REBAD_TEST_CASES_H
+#ifndef VSQL_CORRUPTOR_TEST_CASES_H
+#define VSQL_CORRUPTOR_TEST_CASES_H
 
 #include <string>
 #include <vector>
@@ -198,4 +198,4 @@ inline const std::vector<TestCase>& getTestCases() {
     return testCases;
 }
 
-#endif // REBAD_TEST_CASES_H
+#endif // VSQL_CORRUPTOR_TEST_CASES_H

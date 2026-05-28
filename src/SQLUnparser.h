@@ -14,8 +14,8 @@
  * along with this program; if not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef REBAD_SQL_UNPARSER_H
-#define REBAD_SQL_UNPARSER_H
+#ifndef VSQL_CORRUPTOR_SQL_UNPARSER_H
+#define VSQL_CORRUPTOR_SQL_UNPARSER_H
 
 #include <string>
 #include <vector>
@@ -34,4 +34,4 @@ private:
     static std::string opToString(const hsql::Expr* expr);
 };
 
-#endif // REBAD_SQL_UNPARSER_H
+#endif // VSQL_CORRUPTOR_SQL_UNPARSER_H

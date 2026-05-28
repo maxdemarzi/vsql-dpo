@@ -14,8 +14,8 @@
  * along with this program; if not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef REBAD_SCHEMA_H
-#define REBAD_SCHEMA_H
+#ifndef VSQL_CORRUPTOR_SCHEMA_H
+#define VSQL_CORRUPTOR_SCHEMA_H
 
 #include <string>
 #include <vector>
@@ -102,4 +102,4 @@ public:
 
 } // namespace schema
 
-#endif // REBAD_SCHEMA_H
+#endif // VSQL_CORRUPTOR_SCHEMA_H

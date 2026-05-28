@@ -1,282 +1,155 @@
-# VillageSQL Extension Template
+# vsql-corruptor
 
-A minimal template project for creating VillageSQL extensions. This template provides the essential structure and files needed to develop, build, and test custom VillageSQL extensions.
+`vsql-corruptor` is a SQL Query Corruption Engine extension for VillageSQL. It parses standard SQL queries and systematically injects syntactical and logical mutations/errors. This is useful for fuzzing SQL engines, validating optimizer correctness, testing client-side query validation, or verification of database resilience.
 
-## What This Is
+## Features
 
-This template demonstrates how to create a VillageSQL extension by implementing a simple "Hello, World!" function. It includes all the minimum required files and follows the VillageSQL extension framework (VEF) structure.
+- **AST-level Corruption**: Uses `hyrise/sql-parser` to parse input SQL into an Abstract Syntax Tree (AST), mutates specific parts, and unparses it back to a valid/invalid query string.
+- **35+ Built-in Corruption Types**: Support for a wide variety of mutation rules, ranging from operator swaps to schema-aware type mismatches and group-by omissions.
+- **Schema-Aware Injections**: Ability to pass custom schemas to make corruptions (e.g. type incompatibilities or join keys) realistic and targeted.
 
-## Project Structure
+## Registered Functions
 
+The extension exposes two main query corruption functions:
+
+### 1. `vsql_corrupt(query [, corruption_type [, schema]])`
+Applies a corruption to the specified SQL query.
+- **`query`** (STRING): The SQL query string to corrupt.
+- **`corruption_type`** (STRING, Optional): The specific type of corruption to apply (e.g., `'COMPARISON_OPERATOR_SWAP'`). If set to `'RANDOM'`, `NULL`, or omitted, a random corruption from all supported types will be selected.
+- **`schema`** (STRING, Optional): A custom table/column schema string. If omitted, a default schema is used.
+- **Returns**: A corrupted SQL query string.
+
+### 2. `vsql_corrupt_with_schema(query, corruption_type, schema)`
+An explicit version that requires the corruption type and a schema string.
+- **Returns**: A corrupted SQL query string.
+
+---
+
+## Schema Format
+
+Schemas are defined using a semicolon-separated list of tables. Each table lists its columns and types after a colon:
 ```
-vsql_extension_template/
-├── manifest.json           # Extension metadata (name, version, description, etc.)
-├── CMakeLists.txt         # CMake build configuration
-├── cmake/
-│   └── FindVillageSQL.cmake  # CMake module for finding VillageSQL
-├── src/
-│   └── hello.cc           # C++ implementation using VEF API
-└── mysql-test/
-    ├── t/                 # Test files (.test)
-    │   └── hello_basic.test
-    └── r/                 # Expected results (.result)
-        └── hello_basic.result
+table1:col1 TYPE,col2 TYPE;table2:col1 TYPE
+```
+Example:
+```sql
+SELECT vsql_corrupt(
+  'SELECT first_name FROM customers WHERE first_name = \'Alice\'',
+  'TYPE_INCOMPATIBILITY',
+  'customers:first_name VARCHAR,id INT'
+);
+-- Returns: SELECT first_name FROM customers WHERE (first_name = 1234)
 ```
 
-## Prerequisites
+### Default Schema
+If no custom schema is provided, the extension defaults to a schema with:
+- **`users`** (id INT, name VARCHAR, age INT)
+- **`orders`** (id INT, user_id INT, amount DECIMAL, order_date DATE)
+- **`order_items`** (id INT, order_id INT, product_name VARCHAR, quantity INT)
 
+---
+
+## Supported Corruption Types
+
+| Type | Description |
+|---|---|
+| `WRONG_JOIN_KEY` | Swaps or modifies join keys |
+| `MISSING_GROUP_BY` | Omit GROUP BY clause or columns |
+| `HALLUCINATED_COLUMN` | Injects a non-existent column name |
+| `AGGREGATE_MISUSE` | Incorrect aggregate functions application |
+| `ALIAS_SHADOWING` | Shadow variables or introduce duplicate aliases |
+| `INVALID_NESTING` | Invalidate subquery structure or nesting |
+| `TYPE_INCOMPATIBILITY` | Forces operation between mismatched types (e.g. VARCHAR = INT) |
+| `COMPARISON_WITH_NULL` | Mutates comparison operators against NULL |
+| `NON_BOOLEAN_WHERE` | Inserts non-boolean expression in WHERE |
+| `JOIN_ON_TRUE` | Injects `ON TRUE` / `ON 1=1` for joins |
+| `WRONG_AGGREGATION` | Swaps aggregator functions (e.g., `SUM` $\rightarrow$ `AVG`) |
+| `JOIN_TYPE_MUTATION` | Changes join type (e.g., `LEFT` $\rightarrow$ `INNER`) |
+| `LOGICAL_OPERATOR_SWAP` | Swaps `AND` $\leftrightarrow$ `OR`, or `NOT` |
+| `COMPARISON_OPERATOR_SWAP`| Swaps comparison operators (e.g. `=` $\leftrightarrow$ `!=`) |
+| `UNNECESSARY_JOIN` | Injects an unrelated table join |
+| `WILDCARD_HALLUCINATION` | Injects incorrect wildcards into queries |
+| `DISTINCT_MUTATION` | Adds or removes the `DISTINCT` keyword |
+| `HAVING_CLAUSE_MUTATION` | Modifies `HAVING` clause expressions |
+| `ORDER_BY_DIRECTION_SWAP` | Inverts `ASC` $\leftrightarrow$ `DESC` |
+| `MISSING_WHERE_CLAUSE` | Removes `WHERE` clauses from queries |
+| `LIMIT_MUTATION` | Modifies or deletes `LIMIT` values |
+| `MATH_OPERATOR_SWAP` | Swaps math operators (e.g. `+` $\leftrightarrow$ `-`) |
+| `LIKE_TO_EQUALS_SWAP` | Swaps `LIKE` operator to `=` |
+| `UNION_ALL_MUTATION` | Mutates `UNION` $\leftrightarrow$ `UNION ALL` |
+| `IN_TO_EQUALS` | Converts `IN (...)` expression to `=` |
+| `IS_NULL_INVERSION` | Swaps `IS NULL` $\leftrightarrow$ `IS NOT NULL` |
+| `BETWEEN_REVERSAL` | Reverses bounds in `BETWEEN` statements |
+| `EXISTS_INVERSION` | Inverts `EXISTS` to `NOT EXISTS` |
+| `STRING_FUNCTION_MUTATION`| Mutates string manipulation functions |
+| `IN_INVERSION` | Swaps `IN` $\leftrightarrow$ `NOT IN` |
+| `OUTER_JOIN_DIRECTION_SWAP`| Swaps `LEFT` $\leftrightarrow$ `RIGHT` join direction |
+| `AGGREGATE_DISTINCT_MUTATION`| Injects or removes `DISTINCT` within aggregates |
+| `OFFSET_MUTATION` | Modifies or deletes `OFFSET` values |
+| `SET_OPERATION_SWAP` | Swaps set operators (`UNION`, `EXCEPT`, `INTERSECT`) |
+| `CASE_CONDITION_SWAP` | Mutates conditions inside `CASE WHEN` clauses |
+
+---
+
+## Build System
+
+To build the extension, you need:
 - VillageSQL build directory (with completed build)
-- CMake 3.16 or higher
+- CMake 3.18 or higher
 - C++ compiler with C++17 support
-- OpenSSL development libraries
 
-📚 **Full Documentation**: Visit [villagesql.com/docs](https://villagesql.com/docs) for comprehensive guides on building extensions, architecture details, and more.
-
-## Building the Extension
-
-1. Create a build directory and configure:
-
-   **Linux:**
-   ```bash
-   mkdir build
-   cd build
-   cmake .. -DVillageSQL_BUILD_DIR=$HOME/build/villagesql
-   ```
-
-   **macOS:**
-   ```bash
-   mkdir build
-   cd build
-   cmake .. -DVillageSQL_BUILD_DIR=~/build/villagesql
-   ```
-
-   **Note**: `VillageSQL_BUILD_DIR` should point to your VillageSQL build directory. The VEB install directory is automatically set to `${VillageSQL_BUILD_DIR}/veb_output_directory`.
-
-2. Build the extension:
-
-   ```bash
-   make -j $(($(getconf _NPROCESSORS_ONLN) - 2))
-   ```
-
-   This creates the `vsql_extension_template.veb` package in the build directory.
-
-3. Install the VEB (optional):
-
+### Building the Extension
+Run `cmake` and specify `VillageSQL_BUILD_DIR`:
 ```bash
-make install
+mkdir build
+cd build
+cmake .. -DVillageSQL_BUILD_DIR=/path/to/villagesql/build-debug
+make -j$(nproc)
 ```
+This produces the `vsql_corruptor.veb` package file inside the `build/` directory.
 
-This copies the VEB to the directory specified by `VillageSQL_VEB_INSTALL_DIR`. If not using `make install`, you can manually copy the VEB file to your desired location.
-
-## Using the Extension
-
-After building the VEB file, load the extension in VillageSQL:
-
-```sql
-INSTALL EXTENSION vsql_extension_template;
-```
-
-Then test the function:
-
-```sql
-SELECT hello_world();
--- Returns: Hello, World!
-```
-
-Note: Extension names use underscores, not hyphens (e.g., `vsql_extension_template`).
+---
 
 ## Testing
 
-The extension includes test files using the MySQL Test Runner (MTR) framework.
+A local CI script is provided to automate build and execution of MTR (MySQL Test Runner) test suites against the extension.
 
-### Running Tests
-
-**Option 1 (Default): Using installed VEB**
-
-This method assumes you have successfully run `make install` to install the VEB to your veb_dir.
-
-**Linux:**
+### Running Local CI Tests
+Export the `VILLAGESQL_BUILD_DIR` environment variable and run `./local-ci.sh`:
 ```bash
-cd $HOME/build/villagesql/mysql-test
-perl mysql-test-run.pl --suite=/path/to/vsql-extension-template/mysql-test
-
-# Run with specific options
-perl mysql-test-run.pl --suite=/path/to/vsql-extension-template/mysql-test --parallel=auto
+export VILLAGESQL_BUILD_DIR=/home/maxdemarzi/build/villagesql
+./local-ci.sh
 ```
 
-**macOS:**
+### Recording Expected Results
+To record or update test results in `mysql-test/r/`:
 ```bash
-cd ~/build/villagesql/mysql-test
-perl mysql-test-run.pl --suite=/path/to/vsql-extension-template/mysql-test
-
-# Run with specific options
-perl mysql-test-run.pl --suite=/path/to/vsql-extension-template/mysql-test --parallel=auto
+./local-ci.sh --record
 ```
 
-**Option 2: Using a specific VEB file**
+---
 
-Use this to test a specific VEB build without installing it first:
+## Installing & Loading the Extension
 
-**Linux:**
-```bash
-cd $HOME/build/villagesql/mysql-test
-VSQL_EXTENSION_TEMPLATE_VEB=/path/to/build/vsql_extension_template.veb \
-  perl mysql-test-run.pl --suite=/path/to/vsql-extension-template/mysql-test
+After compiling and generating `vsql_corruptor.veb`, load the extension in VillageSQL:
+
+```sql
+INSTALL EXTENSION vsql_corruptor;
 ```
 
-**macOS:**
-```bash
-cd ~/build/villagesql/mysql-test
-VSQL_EXTENSION_TEMPLATE_VEB=/path/to/build/vsql_extension_template.veb \
-  perl mysql-test-run.pl --suite=/path/to/vsql-extension-template/mysql-test
+Verify your loaded functions:
+```sql
+SELECT vsql_corrupt('SELECT name, age FROM users WHERE age = 30', 'COMPARISON_OPERATOR_SWAP') AS comparison_swap;
+-- Returns: SELECT name, age FROM users WHERE (age != 30)
 ```
 
-### Creating/Updating Test Results
-
-To create or update expected test results:
-
-**Linux:**
-```bash
-cd $HOME/build/villagesql/mysql-test
-perl mysql-test-run.pl --suite=/path/to/test --record
+To clean up:
+```sql
+UNINSTALL EXTENSION vsql_corruptor;
 ```
 
-**macOS:**
-```bash
-cd ~/build/villagesql/mysql-test
-perl mysql-test-run.pl --suite=/path/to/test --record
-```
-
-## Customizing This Template
-
-To create your own extension:
-
-1. **Update `manifest.json`**:
-   - Change `name` to your extension name (use underscores, e.g., `my_extension_name`)
-   - Update `description`, `author`, and other metadata
-
-2. **Update `CMakeLists.txt`**:
-   - Change `EXTENSION_NAME` to match your extension (use underscores)
-   - Update the library name and source files in `add_library()`
-   - Add dependencies if needed (e.g., `find_package()`, `target_link_libraries()`)
-
-3. **Implement Your Functions**:
-   - Modify `src/hello.cc` or create new source files
-   - Include `<villagesql/vsql.h>` and `using namespace vsql;`
-   - Use typed wrapper parameters: `IntArg`, `RealArg`, `StringArg`, `StringResult`, etc.
-   - Register functions using `VEF_GENERATE_ENTRY_POINTS()` macro
-
-4. **Create Tests**:
-   - Add `.test` files in the `mysql-test/t/` directory
-   - Generate expected results with `--record` flag
-   - Verify your functions work correctly
-
-## Extension Development Tips
-
-- **Extension Naming**: Always use underscores in extension names, not hyphens
-- **Return Types**: Common types are `STRING`, `INT`, `REAL`, or custom types
-- **String Results**: Write into `out.buffer()`, then call `out.set_length(n)`
-- **NULL Handling**: Call `arg.is_null()` on input args; call `out.set_null()` to return NULL
-- **Error Handling**: Call `out.error(msg)` to abort with an error; `out.warning(msg)` for a warning
-- **Testing**: Always test with various inputs including edge cases and NULL values
-
-## Example: Adding a New Function
-
-1. Add implementation to `src/hello.cc`:
-
-```cpp
-void greet_impl(StringArg name, StringResult out) {
-    if (name.is_null()) { out.set_null(); return; }
-    auto val = name.value();
-    auto buf = out.buffer();
-    auto len = snprintf(buf.data(), buf.size(), "Hello, %.*s!",
-                        (int)val.size(), val.data());
-    out.set_length(len);
-}
-```
-
-2. Register in `VEF_GENERATE_ENTRY_POINTS()`:
-
-```cpp
-VEF_GENERATE_ENTRY_POINTS(
-  make_extension()
-    .func(make_func<&hello_world_impl>("hello_world")
-      .returns(STRING)
-      .no_params()
-      .buffer_size(14)
-      .build())
-    .func(make_func<&greet_impl>("greet")
-      .returns(STRING)
-      .param(STRING)
-      .buffer_size(256)
-      .build())
-)
-```
-
-3. Rebuild and test:
-
-   ```bash
-   cd build
-   make -j $(($(getconf _NPROCESSORS_ONLN) - 2))
-   make install  # If VillageSQL_VEB_INSTALL_DIR is configured
-   ```
-
-   Then in VillageSQL:
-
-   ```sql
-   INSTALL EXTENSION vsql_extension_template;
-
-   -- Call without prefix
-   SELECT greet('VillageSQL');
-
-   -- Or with explicit namespace
-   SELECT vsql_extension_template.greet('VillageSQL');
-   ```
-
-## Troubleshooting
-
-### Build Failures
-
-**VillageSQL SDK not found:**
-```bash
-# Make sure VillageSQL_BUILD_DIR points to your build directory
-# Linux:
-cmake .. -DVillageSQL_BUILD_DIR=$HOME/build/villagesql
-
-# macOS:
-cmake .. -DVillageSQL_BUILD_DIR=~/build/villagesql
-```
-
-**OpenSSL not found:**
-```bash
-# macOS with Homebrew
-brew install openssl@3
-cmake .. -DVillageSQL_BUILD_DIR=~/build/villagesql -DWITH_SSL=/opt/homebrew/opt/openssl@3
-```
-
-### Extension Loading Issues
-
-**Extension not found after installation:**
-- Verify the VEB file was copied to the correct directory
-- Check that `INSTALL EXTENSION extension_name` uses the correct name (underscores, not hyphens)
-- Restart the VillageSQL server if needed
-
-**Function not found:**
-- Ensure the extension is installed: `SELECT * FROM INFORMATION_SCHEMA.EXTENSIONS;`
-- Try using explicit namespace: `extension_name.function_name()`
-- Check the server's VEF protocol support level to confirm compatibility with
-  your extension: `SELECT @@villagesql_vef_server_protocol;`
-
-## Resources
-
-- [VillageSQL Documentation](https://villagesql.com/docs)
-- [VillageSQL Extension Framework (VEF) Guide](https://villagesql.com/docs)
-- [CMake Documentation](https://cmake.org/documentation/)
+---
 
 ## License
 
-This template is released under the GPL-2.0 license. See the license header in source files for details.
-
-## Contributing
-
-When creating extensions based on this template, ensure your code follows the same license and includes appropriate copyright notices.
+This project is licensed under the GPL-2.0 License.

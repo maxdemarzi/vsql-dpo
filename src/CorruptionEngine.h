@@ -14,8 +14,8 @@
  * along with this program; if not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef REBAD_CORRUPTION_ENGINE_H
-#define REBAD_CORRUPTION_ENGINE_H
+#ifndef VSQL_CORRUPTOR_CORRUPTION_ENGINE_H
+#define VSQL_CORRUPTOR_CORRUPTION_ENGINE_H
 
 #include <string>
 #include <vector>
@@ -84,4 +84,4 @@ private:
     std::string generateTypo(const std::string& original);
 };
 
-#endif // REBAD_CORRUPTION_ENGINE_H
+#endif // VSQL_CORRUPTOR_CORRUPTION_ENGINE_H

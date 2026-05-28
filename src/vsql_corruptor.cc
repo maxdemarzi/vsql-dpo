@@ -188,9 +188,9 @@ CorruptionEngine::CorruptionType getRandomCorruptionType() {
 
 } // namespace
 
-void rebad_corrupt_impl(VarArgs args, StringResult out) {
+void vsql_corrupt_impl(VarArgs args, StringResult out) {
     if (args.size() < 1 || args.size() > 3) {
-        out.error("rebad_corrupt expects between 1 and 3 arguments: query, [corruption_type], [schema]");
+        out.error("vsql_corrupt expects between 1 and 3 arguments: query, [corruption_type], [schema]");
         return;
     }
 
@@ -200,7 +200,7 @@ void rebad_corrupt_impl(VarArgs args, StringResult out) {
     }
 
     if (!args[0].is_str()) {
-        out.error("First argument to rebad_corrupt must be a query string");
+        out.error("First argument to vsql_corrupt must be a query string");
         return;
     }
     std::string_view query = args[0].as_str();
@@ -250,7 +250,7 @@ void rebad_corrupt_impl(VarArgs args, StringResult out) {
     out.set_length(corrupted.length());
 }
 
-void rebad_corrupt_with_schema_impl(StringArg query, StringArg corruption_type, StringArg schema_str, StringResult out) {
+void vsql_corrupt_with_schema_impl(StringArg query, StringArg corruption_type, StringArg schema_str, StringResult out) {
     if (query.is_null() || schema_str.is_null()) {
         out.set_null();
         return;
@@ -285,12 +285,12 @@ void rebad_corrupt_with_schema_impl(StringArg query, StringArg corruption_type, 
 
 VEF_GENERATE_ENTRY_POINTS(
   make_extension()
-    .func(make_func<&rebad_corrupt_impl>("rebad_corrupt")
+    .func(make_func<&vsql_corrupt_impl>("vsql_corrupt")
       .returns(STRING)
       .varargs()
       .buffer_size(65535)
       .build())
-    .func(make_func<&rebad_corrupt_with_schema_impl>("rebad_corrupt_with_schema")
+    .func(make_func<&vsql_corrupt_with_schema_impl>("vsql_corrupt_with_schema")
       .returns(STRING)
       .param(STRING)
       .param(STRING)
