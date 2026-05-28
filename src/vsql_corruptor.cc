@@ -15,6 +15,7 @@
  */
 
 #include <villagesql/vsql.h>
+#include <villagesql/preview/sql_query.h>
 #include "CorruptionEngine.h"
 #include <string>
 #include <optional>
@@ -24,6 +25,10 @@
 #include <algorithm>
 
 using namespace vsql;
+
+extern void *thd_get_current_thd();
+
+static vsql::preview_sql_query::SqlQueryCapability g_sql_query_cap;
 
 namespace {
 
@@ -112,34 +117,92 @@ schema::MySQLSchema parseSchema(std::string_view schema_str) {
     return schema::MySQLSchema(tables);
 }
 
-schema::MySQLSchema getDefaultSchema() {
-    schema::MySQLTable usersTable{
-        "users",
-        {
-            {"id", "INT", true},
-            {"name", "VARCHAR", false},
-            {"age", "INT", false}
+schema::MySQLSchema getSchemaFromMySQL(std::string_view db_name, std::string& err_msg) {
+    void *thd = thd_get_current_thd();
+    if (!thd) {
+        err_msg = "No current THD context available in this thread";
+        return schema::MySQLSchema();
+    }
+
+    struct vef_thread_handle_t {
+        void *thd;
+    } mock_handle;
+    mock_handle.thd = thd;
+
+    auto session = g_sql_query_cap.open(reinterpret_cast<::vef_thread_handle_t *>(&mock_handle));
+    if (!session) {
+        err_msg = "Failed to open SQL session using preview::sql_query capability";
+        return schema::MySQLSchema();
+    }
+
+    std::string db_str(db_name);
+    std::string escaped_db;
+    for (char c : db_str) {
+        if (c == '\'') escaped_db += "\\'";
+        else escaped_db += c;
+    }
+
+    std::string sql = "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_KEY "
+                      "FROM INFORMATION_SCHEMA.COLUMNS "
+                      "WHERE TABLE_SCHEMA = '" + escaped_db + "' "
+                      "ORDER BY TABLE_NAME, ORDINAL_POSITION";
+
+    auto result = session.sql(sql).execute();
+    if (!result || result.has_error()) {
+        err_msg = "SQL Query failed: " + std::string(result.error().message);
+        return schema::MySQLSchema();
+    }
+
+    std::vector<schema::MySQLTable> tables;
+    std::string current_table_name = "";
+    std::vector<schema::MySQLColumn> current_columns;
+
+    while (result.next()) {
+        std::string_view table_name_sv = result.column_str(0);
+        std::string_view col_name_sv = result.column_str(1);
+        std::string_view data_type_sv = result.column_str(2);
+        std::string_view col_key_sv = result.column_str(3);
+
+        if (table_name_sv.empty() || col_name_sv.empty() || data_type_sv.empty()) {
+            continue;
         }
-    };
-    schema::MySQLTable ordersTable{
-        "orders",
-        {
-            {"id", "INT", true},
-            {"user_id", "INT", false},
-            {"amount", "DECIMAL", false},
-            {"order_date", "DATE", false}
+
+        std::string table_name(table_name_sv);
+        std::string col_name(col_name_sv);
+        std::string data_type(data_type_sv);
+        std::string col_key(col_key_sv);
+
+        std::transform(data_type.begin(), data_type.end(), data_type.begin(), ::toupper);
+        bool is_pri = (col_key == "PRI");
+
+        if (table_name != current_table_name) {
+            if (!current_table_name.empty()) {
+                tables.push_back({current_table_name, current_columns});
+                current_columns.clear();
+            }
+            current_table_name = table_name;
         }
-    };
-    schema::MySQLTable itemsTable{
-        "order_items",
-        {
-            {"id", "INT", true},
-            {"order_id", "INT", false},
-            {"product_name", "VARCHAR", false},
-            {"quantity", "INT", false}
-        }
-    };
-    return schema::MySQLSchema{{usersTable, ordersTable, itemsTable}};
+        current_columns.push_back({col_name, data_type, is_pri});
+    }
+
+    if (!current_table_name.empty()) {
+        tables.push_back({current_table_name, current_columns});
+    }
+
+    if (tables.empty()) {
+        err_msg = "No tables found in database schema for '" + db_str + "'";
+        return schema::MySQLSchema();
+    }
+
+    return schema::MySQLSchema(tables);
+}
+
+schema::MySQLSchema resolveSchema(std::string_view schema_or_db, std::string& err_msg) {
+    if (schema_or_db.find(':') != std::string::npos) {
+        return parseSchema(schema_or_db);
+    } else {
+        return getSchemaFromMySQL(schema_or_db, err_msg);
+    }
 }
 
 CorruptionEngine::CorruptionType getRandomCorruptionType() {
@@ -188,57 +251,36 @@ CorruptionEngine::CorruptionType getRandomCorruptionType() {
 
 } // namespace
 
-void vsql_corrupt_impl(VarArgs args, StringResult out) {
-    if (args.size() < 1 || args.size() > 3) {
-        out.error("vsql_corrupt expects between 1 and 3 arguments: query, [corruption_type], [schema]");
-        return;
-    }
-
-    if (args[0].is_null()) {
+void vsql_corrupt_impl(StringArg query, StringArg corruption_type, StringArg schema_or_db, StringResult out) {
+    if (query.is_null() || schema_or_db.is_null()) {
         out.set_null();
         return;
     }
 
-    if (!args[0].is_str()) {
-        out.error("First argument to vsql_corrupt must be a query string");
-        return;
-    }
-    std::string_view query = args[0].as_str();
-
     // Determine corruption type
     CorruptionEngine::CorruptionType type = getRandomCorruptionType();
-    if (args.size() >= 2) {
-        if (!args[1].is_null()) {
-            if (!args[1].is_str()) {
-                out.error("Second argument (corruption type) must be a string");
+    if (!corruption_type.is_null()) {
+        std::string_view type_str = corruption_type.value();
+        if (type_str != "RANDOM" && !type_str.empty()) {
+            auto parsed_type = parseCorruptionType(type_str);
+            if (!parsed_type) {
+                out.error("Invalid corruption type specified");
                 return;
             }
-            std::string_view type_str = args[1].as_str();
-            if (type_str != "RANDOM" && !type_str.empty()) {
-                auto parsed_type = parseCorruptionType(type_str);
-                if (!parsed_type) {
-                    out.error("Invalid corruption type specified");
-                    return;
-                }
-                type = *parsed_type;
-            }
+            type = *parsed_type;
         }
     }
 
     // Determine schema
-    schema::MySQLSchema schemaObj = getDefaultSchema();
-    if (args.size() >= 3) {
-        if (!args[2].is_null()) {
-            if (!args[2].is_str()) {
-                out.error("Third argument (schema) must be a string");
-                return;
-            }
-            schemaObj = parseSchema(args[2].as_str());
-        }
+    std::string err_msg;
+    schema::MySQLSchema schemaObj = resolveSchema(schema_or_db.value(), err_msg);
+    if (!err_msg.empty()) {
+        out.error(err_msg.c_str());
+        return;
     }
 
     CorruptionEngine engine(schemaObj);
-    std::string corrupted = engine.applyCorruption(std::string(query), type);
+    std::string corrupted = engine.applyCorruption(std::string(query.value()), type);
 
     auto buf = out.buffer();
     if (corrupted.length() > buf.size()) {
@@ -250,8 +292,8 @@ void vsql_corrupt_impl(VarArgs args, StringResult out) {
     out.set_length(corrupted.length());
 }
 
-void vsql_corrupt_with_schema_impl(StringArg query, StringArg corruption_type, StringArg schema_str, StringResult out) {
-    if (query.is_null() || schema_str.is_null()) {
+void vsql_corrupt_with_schema_impl(StringArg query, StringArg corruption_type, StringArg schema_or_db, StringResult out) {
+    if (query.is_null() || schema_or_db.is_null()) {
         out.set_null();
         return;
     }
@@ -269,7 +311,13 @@ void vsql_corrupt_with_schema_impl(StringArg query, StringArg corruption_type, S
         }
     }
 
-    schema::MySQLSchema schemaObj = parseSchema(schema_str.value());
+    std::string err_msg;
+    schema::MySQLSchema schemaObj = resolveSchema(schema_or_db.value(), err_msg);
+    if (!err_msg.empty()) {
+        out.error(err_msg.c_str());
+        return;
+    }
+
     CorruptionEngine engine(schemaObj);
     std::string corrupted = engine.applyCorruption(std::string(query.value()), type);
 
@@ -285,9 +333,12 @@ void vsql_corrupt_with_schema_impl(StringArg query, StringArg corruption_type, S
 
 VEF_GENERATE_ENTRY_POINTS(
   make_extension()
+    .with(g_sql_query_cap)
     .func(make_func<&vsql_corrupt_impl>("vsql_corrupt")
       .returns(STRING)
-      .varargs()
+      .param(STRING)
+      .param(STRING)
+      .param(STRING)
       .buffer_size(65535)
       .build())
     .func(make_func<&vsql_corrupt_with_schema_impl>("vsql_corrupt_with_schema")

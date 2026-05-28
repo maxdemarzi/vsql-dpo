@@ -52,6 +52,7 @@ perl ./mysql-test/mysql-test-run.pl \
     --parallel=1 \
     --nounit-tests \
     --mysqld=--veb-dir="$VEB_DIR" \
+    --mysqld=--vsql-allow-preview-extensions=ON \
     "$@"
 
 log "MTR finished with exit code: $?"

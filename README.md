@@ -1,6 +1,6 @@
 # vsql-corruptor
 
-`vsql-corruptor` is a SQL Query Corruption Engine extension for VillageSQL. It parses standard SQL queries and systematically injects syntactical and logical mutations/errors. This is useful for fuzzing SQL engines, validating optimizer correctness, testing client-side query validation, or verification of database resilience.
+`vsql-corruptor` is a SQL Query Corruption Engine extension for VillageSQL. It parses standard SQL queries and systematically injects syntactical and logical mutations/errors. This is used to generate negative training examples for DPO (Direct Preference Optimization) fine-tuning of text-to-SQL models.
 
 ## Features
 
@@ -12,40 +12,47 @@
 
 The extension exposes two main query corruption functions:
 
-### 1. `vsql_corrupt(query [, corruption_type [, schema]])`
-Applies a corruption to the specified SQL query.
+### 1. `vsql_corrupt(query, corruption_type, schema_or_db_name)`
+Applies a corruption to the specified SQL query. All three arguments are required.
 - **`query`** (STRING): The SQL query string to corrupt.
-- **`corruption_type`** (STRING, Optional): The specific type of corruption to apply (e.g., `'COMPARISON_OPERATOR_SWAP'`). If set to `'RANDOM'`, `NULL`, or omitted, a random corruption from all supported types will be selected.
-- **`schema`** (STRING, Optional): A custom table/column schema string. If omitted, a default schema is used.
+- **`corruption_type`** (STRING): The specific type of corruption to apply (e.g., `'COMPARISON_OPERATOR_SWAP'`). If set to `'RANDOM'` or `NULL`, a random corruption from all supported types will be selected.
+- **`schema_or_db_name`** (STRING): Either a schema definition string (containing a `:` character) or a database name.
 - **Returns**: A corrupted SQL query string.
 
-### 2. `vsql_corrupt_with_schema(query, corruption_type, schema)`
-An explicit version that requires the corruption type and a schema string.
+### 2. `vsql_corrupt_with_schema(query, corruption_type, schema_or_db_name)`
+Equivalent to `vsql_corrupt`. All three arguments are required.
 - **Returns**: A corrupted SQL query string.
 
 ---
 
-## Schema Format
+## Schema and Database Resolution
 
-Schemas are defined using a semicolon-separated list of tables. Each table lists its columns and types after a colon:
-```
-table1:col1 TYPE,col2 TYPE;table2:col1 TYPE
-```
-Example:
-```sql
-SELECT vsql_corrupt(
-  'SELECT first_name FROM customers WHERE first_name = \'Alice\'',
-  'TYPE_INCOMPATIBILITY',
-  'customers:first_name VARCHAR,id INT'
-);
--- Returns: SELECT first_name FROM customers WHERE (first_name = 1234)
-```
+The extension resolves the database schema structure from the third parameter `schema_or_db_name`:
 
-### Default Schema
-If no custom schema is provided, the extension defaults to a schema with:
-- **`users`** (id INT, name VARCHAR, age INT)
-- **`orders`** (id INT, user_id INT, amount DECIMAL, order_date DATE)
-- **`order_items`** (id INT, order_id INT, product_name VARCHAR, quantity INT)
+1. **Explicit Schema Format**:
+   If the parameter contains a colon `:`, it is parsed as a semicolon-separated list of table definitions. Each table lists its columns and types:
+   ```
+   table1:col1 TYPE,col2 TYPE;table2:col1 TYPE
+   ```
+   Example:
+   ```sql
+   SELECT vsql_corrupt(
+     'SELECT first_name FROM customers WHERE first_name = \'Alice\'',
+     'TYPE_INCOMPATIBILITY',
+     'customers:first_name VARCHAR,id INT'
+   );
+   -- Returns: SELECT first_name FROM customers WHERE (first_name = 1234)
+   ```
+
+2. **Dynamic Database Lookup**:
+   If the parameter does *not* contain a colon `:`, it is treated as a MySQL database name. The extension queries the local MySQL instance's `INFORMATION_SCHEMA.COLUMNS` to dynamically load the schema:
+   ```sql
+   SELECT vsql_corrupt(
+     'SELECT first_name FROM customers WHERE id = 30',
+     'COMPARISON_OPERATOR_SWAP',
+     'test_corrupt_db'
+   );
+   ```
 
 ---
 
