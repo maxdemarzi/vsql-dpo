@@ -179,7 +179,7 @@ void CorruptionEngine::visitStatement(hsql::SQLStatement* stmt, CorruptionType t
                 delete select->limit;
                 select->limit = nullptr;
             } else {
-                select->limit = new hsql::LimitDescription(hsql::Expr::makeLiteral(1LL), nullptr);
+                select->limit = new hsql::LimitDescription(hsql::Expr::makeLiteral(static_cast<int64_t>(1)), nullptr);
             }
         } else if (type == CorruptionType::OFFSET_MUTATION) {
             if (select->limit) {
@@ -187,10 +187,10 @@ void CorruptionEngine::visitStatement(hsql::SQLStatement* stmt, CorruptionType t
                     delete select->limit->offset;
                     select->limit->offset = nullptr;
                 } else {
-                    select->limit->offset = hsql::Expr::makeLiteral(1LL);
+                    select->limit->offset = hsql::Expr::makeLiteral(static_cast<int64_t>(1));
                 }
             } else {
-                select->limit = new hsql::LimitDescription(nullptr, hsql::Expr::makeLiteral(1LL));
+                select->limit = new hsql::LimitDescription(nullptr, hsql::Expr::makeLiteral(static_cast<int64_t>(1)));
             }
         } else if (type == CorruptionType::UNION_ALL_MUTATION) {
             if (select->setOperations) {
@@ -287,7 +287,7 @@ void CorruptionEngine::visitExpr(hsql::Expr* expr, CorruptionType type) {
             }
             delete expr->expr2;
             if (isStr) {
-                expr->expr2 = hsql::Expr::makeLiteral(1234LL);
+                expr->expr2 = hsql::Expr::makeLiteral(static_cast<int64_t>(1234));
             } else {
                 std::string val = "mismatch";
                 const auto* table = schema_.getRandomTable();
