@@ -284,9 +284,14 @@ CorruptionEngine::CorruptionType getRandomCorruptionType() {
 static vsql::preview_thread_worker::ThreadWorkerCapability<&schema_cache_worker>
     g_thread_worker_cap{"schema_cache"};
 
-void vsql_schema_cache_ready_impl(IntResult out) {
+void vsql_schema_cache_ready_impl(StringArg db_name, IntResult out) {
+    if (db_name.is_null()) {
+        out.set(0);
+        return;
+    }
     std::shared_lock<std::shared_mutex> lock(g_schema_cache_mutex);
-    out.set(!g_schema_cache.empty() ? 1 : 0);
+    std::string db_str(db_name.value());
+    out.set(g_schema_cache.find(db_str) != g_schema_cache.end() ? 1 : 0);
 }
 
 void vsql_corrupt_impl(StringArg query, StringArg corruption_type, StringArg schema_or_db, StringResult out) {
@@ -347,7 +352,7 @@ VEF_GENERATE_ENTRY_POINTS(
       .build())
     .func(make_func<&vsql_schema_cache_ready_impl>("vsql_schema_cache_ready")
       .returns(INT)
-      .no_params()
+      .param(STRING)
       .build())
 )
 

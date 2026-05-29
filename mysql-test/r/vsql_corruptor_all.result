@@ -1,0 +1,131 @@
+INSTALL EXTENSION vsql_corruptor;
+#
+# Setup test database and tables
+#
+CREATE DATABASE test_corrupt_db_all;
+USE test_corrupt_db_all;
+CREATE TABLE users (
+id INT PRIMARY KEY,
+name VARCHAR(50),
+age INT
+);
+CREATE TABLE orders (
+id INT PRIMARY KEY,
+user_id INT,
+order_date DATE,
+amount DECIMAL(10,2)
+);
+#
+# Test all 35 corruption types deterministically
+#
+SELECT vsql_corrupt('SELECT users.name, orders.amount FROM users INNER JOIN orders ON users.id = orders.user_id', 'WRONG_JOIN_KEY', 'test_corrupt_db_all') != 'SELECT users.name, orders.amount FROM users INNER JOIN orders ON users.id = orders.user_id' AS wrong_join_key;
+wrong_join_key
+1
+SELECT vsql_corrupt('SELECT name, age FROM users GROUP BY name', 'MISSING_GROUP_BY', 'test_corrupt_db_all') != 'SELECT name, age FROM users GROUP BY name' AS missing_group_by;
+missing_group_by
+1
+SELECT vsql_corrupt('SELECT name, age FROM users', 'HALLUCINATED_COLUMN', 'test_corrupt_db_all') != 'SELECT name, age FROM users' AS hallucinated_column;
+hallucinated_column
+1
+SELECT vsql_corrupt('SELECT SUM(name) FROM users', 'AGGREGATE_MISUSE', 'test_corrupt_db_all') != 'SELECT SUM(name) FROM users' AS aggregate_misuse;
+aggregate_misuse
+1
+SELECT vsql_corrupt('SELECT name AS username, age FROM users', 'ALIAS_SHADOWING', 'test_corrupt_db_all') != 'SELECT name AS username, age FROM users' AS alias_shadowing;
+alias_shadowing
+1
+SELECT vsql_corrupt('SELECT name, COUNT(id) FROM users GROUP BY name', 'INVALID_NESTING', 'test_corrupt_db_all') != 'SELECT name, COUNT(id) FROM users GROUP BY name' AS invalid_nesting;
+invalid_nesting
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE name = \'John\'', 'TYPE_INCOMPATIBILITY', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE name = \'John\'' AS type_incompatibility;
+type_incompatibility
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE age = 30', 'COMPARISON_WITH_NULL', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE age = 30' AS comparison_with_null;
+comparison_with_null
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE age = 30', 'NON_BOOLEAN_WHERE', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE age = 30' AS non_boolean_where;
+non_boolean_where
+1
+SELECT vsql_corrupt('SELECT users.name, orders.amount FROM users INNER JOIN orders ON users.id = orders.user_id', 'JOIN_ON_TRUE', 'test_corrupt_db_all') != 'SELECT users.name, orders.amount FROM users INNER JOIN orders ON users.id = orders.user_id' AS join_on_true;
+join_on_true
+1
+SELECT vsql_corrupt('SELECT MAX(age), SUM(id) FROM users', 'WRONG_AGGREGATION', 'test_corrupt_db_all') != 'SELECT MAX(age), SUM(id) FROM users' AS wrong_aggregation;
+wrong_aggregation
+1
+SELECT vsql_corrupt('SELECT users.name, orders.amount FROM users INNER JOIN orders ON users.id = orders.user_id', 'JOIN_TYPE_MUTATION', 'test_corrupt_db_all') != 'SELECT users.name, orders.amount FROM users INNER JOIN orders ON users.id = orders.user_id' AS join_type_mutation;
+join_type_mutation
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE age > 20 AND name = \'John\'', 'LOGICAL_OPERATOR_SWAP', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE age > 20 AND name = \'John\'' AS logical_operator_swap;
+logical_operator_swap
+1
+SELECT vsql_corrupt('SELECT name, age FROM users WHERE age = 30', 'COMPARISON_OPERATOR_SWAP', 'test_corrupt_db_all') != 'SELECT name, age FROM users WHERE age = 30' AS comparison_operator_swap;
+comparison_operator_swap
+1
+SELECT vsql_corrupt('SELECT name FROM users', 'UNNECESSARY_JOIN', 'test_corrupt_db_all') != 'SELECT name FROM users' AS unnecessary_join;
+unnecessary_join
+1
+SELECT vsql_corrupt('SELECT name, age FROM users', 'WILDCARD_HALLUCINATION', 'test_corrupt_db_all') != 'SELECT name, age FROM users' AS wildcard_hallucination;
+wildcard_hallucination
+1
+SELECT vsql_corrupt('SELECT name FROM users', 'DISTINCT_MUTATION', 'test_corrupt_db_all') != 'SELECT name FROM users' AS distinct_mutation;
+distinct_mutation
+1
+SELECT vsql_corrupt('SELECT name, COUNT(id) FROM users GROUP BY name HAVING COUNT(id) > 5', 'HAVING_CLAUSE_MUTATION', 'test_corrupt_db_all') != 'SELECT name, COUNT(id) FROM users GROUP BY name HAVING COUNT(id) > 5' AS having_clause_mutation;
+having_clause_mutation
+1
+SELECT vsql_corrupt('SELECT name FROM users ORDER BY age ASC', 'ORDER_BY_DIRECTION_SWAP', 'test_corrupt_db_all') != 'SELECT name FROM users ORDER BY age ASC' AS order_by_direction_swap;
+order_by_direction_swap
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE age = 30', 'MISSING_WHERE_CLAUSE', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE age = 30' AS missing_where_clause;
+missing_where_clause
+1
+SELECT vsql_corrupt('SELECT name FROM users LIMIT 5', 'LIMIT_MUTATION', 'test_corrupt_db_all') != 'SELECT name FROM users LIMIT 5' AS limit_mutation;
+limit_mutation
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE age + 5 = 30', 'MATH_OPERATOR_SWAP', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE age + 5 = 30' AS math_operator_swap;
+math_operator_swap
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE name LIKE \'J%\'', 'LIKE_TO_EQUALS_SWAP', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE name LIKE \'J%\'' AS like_to_equals_swap;
+like_to_equals_swap
+1
+SELECT vsql_corrupt('SELECT name FROM users UNION SELECT name FROM orders', 'UNION_ALL_MUTATION', 'test_corrupt_db_all') != 'SELECT name FROM users UNION SELECT name FROM orders' AS union_all_mutation;
+union_all_mutation
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE id IN (SELECT user_id FROM orders)', 'IN_TO_EQUALS', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE id IN (SELECT user_id FROM orders)' AS in_to_equals;
+in_to_equals
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE age IS NULL', 'IS_NULL_INVERSION', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE age IS NULL' AS is_null_inversion;
+is_null_inversion
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE age BETWEEN 10 AND 50', 'BETWEEN_REVERSAL', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE age BETWEEN 10 AND 50' AS between_reversal;
+between_reversal
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE EXISTS (SELECT user_id FROM orders WHERE orders.user_id = users.id)', 'EXISTS_INVERSION', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE EXISTS (SELECT user_id FROM orders WHERE orders.user_id = users.id)' AS exists_inversion;
+exists_inversion
+1
+SELECT vsql_corrupt('SELECT UPPER(name) FROM users', 'STRING_FUNCTION_MUTATION', 'test_corrupt_db_all') != 'SELECT UPPER(name) FROM users' AS string_function_mutation;
+string_function_mutation
+1
+SELECT vsql_corrupt('SELECT name FROM users WHERE id IN (1, 2, 3)', 'IN_INVERSION', 'test_corrupt_db_all') != 'SELECT name FROM users WHERE id IN (1, 2, 3)' AS in_inversion;
+in_inversion
+1
+SELECT vsql_corrupt('SELECT users.name, orders.amount FROM users LEFT JOIN orders ON users.id = orders.user_id', 'OUTER_JOIN_DIRECTION_SWAP', 'test_corrupt_db_all') != 'SELECT users.name, orders.amount FROM users LEFT JOIN orders ON users.id = orders.user_id' AS outer_join_direction_swap;
+outer_join_direction_swap
+1
+SELECT vsql_corrupt('SELECT COUNT(DISTINCT name) FROM users', 'AGGREGATE_DISTINCT_MUTATION', 'test_corrupt_db_all') != 'SELECT COUNT(DISTINCT name) FROM users' AS aggregate_distinct_mutation;
+aggregate_distinct_mutation
+1
+SELECT vsql_corrupt('SELECT name FROM users LIMIT 5 OFFSET 2', 'OFFSET_MUTATION', 'test_corrupt_db_all') != 'SELECT name FROM users LIMIT 5 OFFSET 2' AS offset_mutation;
+offset_mutation
+1
+SELECT vsql_corrupt('SELECT name FROM users INTERSECT SELECT name FROM orders', 'SET_OPERATION_SWAP', 'test_corrupt_db_all') != 'SELECT name FROM users INTERSECT SELECT name FROM orders' AS set_operation_swap;
+set_operation_swap
+1
+SELECT vsql_corrupt('SELECT CASE age WHEN 18 THEN name ELSE \'adult\' END FROM users', 'CASE_CONDITION_SWAP', 'test_corrupt_db_all') != 'SELECT CASE age WHEN 18 THEN name ELSE \'adult\' END FROM users' AS case_condition_swap;
+case_condition_swap
+1
+#
+# Cleanup
+#
+DROP DATABASE test_corrupt_db_all;
+USE test;
+UNINSTALL EXTENSION vsql_corruptor;

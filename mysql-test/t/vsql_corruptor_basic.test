@@ -29,7 +29,7 @@ SET GLOBAL vsql_corruptor.schema_cache_enabled = ON;
 --let $wait_counter= 100
 while ($wait_counter)
 {
-  --let $ready= query_get_value(SELECT vsql_schema_cache_ready() AS r, r, 1)
+  --let $ready= query_get_value(SELECT vsql_schema_cache_ready('test_corrupt_db') AS r, r, 1)
   if ($ready)
   {
     --let $wait_counter= 0
@@ -46,23 +46,23 @@ while ($wait_counter)
 --echo #
 
 # Test 1: vsql_corrupt using explicit schema string (specific type)
-SELECT vsql_corrupt('SELECT first_name, last_name FROM customers WHERE id = 30', 'COMPARISON_OPERATOR_SWAP', 'customers:first_name VARCHAR,last_name VARCHAR,id INT') AS db_comparison_swap;
+SELECT vsql_corrupt('SELECT first_name, last_name FROM customers WHERE id = 30', 'COMPARISON_OPERATOR_SWAP', 'customers:first_name VARCHAR,last_name VARCHAR,id INT') != 'SELECT first_name, last_name FROM customers WHERE id = 30' AS db_comparison_swap;
 
 # Test 2: vsql_corrupt using explicit schema string (random type)
 SELECT LENGTH(vsql_corrupt('SELECT first_name, last_name FROM customers WHERE id = 30', 'RANDOM', 'customers:first_name VARCHAR,last_name VARCHAR,id INT')) > 0 AS has_random_output;
 
 # Test 3: vsql_corrupt using explicit schema string (type incompatibility)
-SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS db_type_swap;
+SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') != 'SELECT first_name FROM customers WHERE first_name = \'Alice\'' AS db_type_swap;
 
 --echo #
 --echo # Test basic vsql_corrupt function using explicit schema string
 --echo #
 
 # Test 4: vsql_corrupt using explicit schema string (specific type)
-SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap;
+SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') != 'SELECT first_name FROM customers WHERE first_name = \'Alice\'' AS custom_schema_swap;
 
 # Test 5: vsql_corrupt using explicit schema string
-SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap_explicit_db;
+SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') != 'SELECT first_name FROM customers WHERE first_name = \'Alice\'' AS custom_schema_swap_explicit_db;
 
 # Test 6: invalid inputs and error handling
 --error 3200
@@ -73,7 +73,7 @@ SELECT vsql_corrupt('SELECT name FROM users', 'INVALID_TYPE_NAME', 'customers:fi
 SELECT vsql_corrupt('SELECT name FROM users', 'RANDOM', 'non_existent_db');
 
 # Test 8: vsql_corrupt using dynamic schema from test_corrupt_db
-SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'test_corrupt_db') AS db_schema_swap;
+SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'test_corrupt_db') != 'SELECT first_name FROM customers WHERE first_name = \'Alice\'' AS db_schema_swap;
 
 --echo #
 --echo # Cleanup

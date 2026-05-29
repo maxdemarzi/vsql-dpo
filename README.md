@@ -19,9 +19,10 @@ Applies a corruption to the specified SQL query. All three arguments are require
 - **`schema_or_db_name`** (STRING): Either a schema definition string (containing a `:` character) or a database name.
 - **Returns**: A corrupted SQL query string.
 
-### 2. `vsql_schema_cache_ready()`
-Checks if the background schema cache has been populated.
-- **Returns**: `1` (INT) if the schema cache contains at least one database, or `0` (INT) otherwise.
+### 2. `vsql_schema_cache_ready(db_name)`
+Checks if the background schema cache has been populated for the specified database name.
+- **`db_name`** (STRING): The name of the database to check.
+- **Returns**: `1` (INT) if the database schema is cached, or `0` (INT) otherwise.
 
 ---
 
@@ -52,9 +53,9 @@ The extension resolves the database schema structure from the third parameter `s
    SET GLOBAL vsql_corruptor.schema_cache_enabled = ON;
    ```
    
-   You can verify if the background worker has finished fetching and populating the schema cache by calling:
+   You can verify if the background worker has finished fetching and populating the schema cache for your database by calling:
    ```sql
-   SELECT vsql_schema_cache_ready(); -- Returns 1 if populated, 0 otherwise
+   SELECT vsql_schema_cache_ready('test_corrupt_db'); -- Returns 1 if populated, 0 otherwise
    ```
    
    Example:
@@ -70,43 +71,43 @@ The extension resolves the database schema structure from the third parameter `s
 
 ## Supported Corruption Types
 
-| Type | Description |
-|---|---|
-| `WRONG_JOIN_KEY` | Swaps or modifies join keys |
-| `MISSING_GROUP_BY` | Omit GROUP BY clause or columns |
-| `HALLUCINATED_COLUMN` | Injects a non-existent column name |
-| `AGGREGATE_MISUSE` | Incorrect aggregate functions application |
-| `ALIAS_SHADOWING` | Shadow variables or introduce duplicate aliases |
-| `INVALID_NESTING` | Invalidate subquery structure or nesting |
-| `TYPE_INCOMPATIBILITY` | Forces operation between mismatched types (e.g. VARCHAR = INT) |
-| `COMPARISON_WITH_NULL` | Mutates comparison operators against NULL |
-| `NON_BOOLEAN_WHERE` | Inserts non-boolean expression in WHERE |
-| `JOIN_ON_TRUE` | Injects `ON TRUE` / `ON 1=1` for joins |
-| `WRONG_AGGREGATION` | Swaps aggregator functions (e.g., `SUM` $\rightarrow$ `AVG`) |
-| `JOIN_TYPE_MUTATION` | Changes join type (e.g., `LEFT` $\rightarrow$ `INNER`) |
-| `LOGICAL_OPERATOR_SWAP` | Swaps `AND` $\leftrightarrow$ `OR`, or `NOT` |
-| `COMPARISON_OPERATOR_SWAP`| Swaps comparison operators (e.g. `=` $\leftrightarrow$ `!=`) |
-| `UNNECESSARY_JOIN` | Injects an unrelated table join |
-| `WILDCARD_HALLUCINATION` | Injects incorrect wildcards into queries |
-| `DISTINCT_MUTATION` | Adds or removes the `DISTINCT` keyword |
-| `HAVING_CLAUSE_MUTATION` | Modifies `HAVING` clause expressions |
-| `ORDER_BY_DIRECTION_SWAP` | Inverts `ASC` $\leftrightarrow$ `DESC` |
-| `MISSING_WHERE_CLAUSE` | Removes `WHERE` clauses from queries |
-| `LIMIT_MUTATION` | Modifies or deletes `LIMIT` values |
-| `MATH_OPERATOR_SWAP` | Swaps math operators (e.g. `+` $\leftrightarrow$ `-`) |
-| `LIKE_TO_EQUALS_SWAP` | Swaps `LIKE` operator to `=` |
-| `UNION_ALL_MUTATION` | Mutates `UNION` $\leftrightarrow$ `UNION ALL` |
-| `IN_TO_EQUALS` | Converts `IN (...)` expression to `=` |
-| `IS_NULL_INVERSION` | Swaps `IS NULL` $\leftrightarrow$ `IS NOT NULL` |
-| `BETWEEN_REVERSAL` | Reverses bounds in `BETWEEN` statements |
-| `EXISTS_INVERSION` | Inverts `EXISTS` to `NOT EXISTS` |
-| `STRING_FUNCTION_MUTATION`| Mutates string manipulation functions |
-| `IN_INVERSION` | Swaps `IN` $\leftrightarrow$ `NOT IN` |
-| `OUTER_JOIN_DIRECTION_SWAP`| Swaps `LEFT` $\leftrightarrow$ `RIGHT` join direction |
-| `AGGREGATE_DISTINCT_MUTATION`| Injects or removes `DISTINCT` within aggregates |
-| `OFFSET_MUTATION` | Modifies or deletes `OFFSET` values |
-| `SET_OPERATION_SWAP` | Swaps set operators (`UNION`, `EXCEPT`, `INTERSECT`) |
-| `CASE_CONDITION_SWAP` | Mutates conditions inside `CASE WHEN` clauses |
+| Type | Description | Original Query | Corrupted Query |
+|---|---|---|---|
+| `WRONG_JOIN_KEY` | Swaps or modifies join keys | `SELECT users.name, orders.amount FROM users INNER JOIN orders ON users.id = orders.user_id` | `SELECT users.name, orders.amount FROM users INNER JOIN orders ON (orders.order_date = orders.amount)` |
+| `MISSING_GROUP_BY` | Omit GROUP BY clause or columns | `SELECT name, age FROM users GROUP BY name` | `SELECT name, age FROM users` |
+| `HALLUCINATED_COLUMN` | Injects a non-existent column name | `SELECT name, age FROM users` | `SELECT name, age, aeg FROM users` |
+| `AGGREGATE_MISUSE` | Incorrect aggregate functions application | `SELECT SUM(name) FROM users` | `SELECT MAX(SUM(name)) FROM users` |
+| `ALIAS_SHADOWING` | Shadow variables or introduce duplicate aliases | `SELECT name AS username, age FROM users` | `SELECT name AS username, age AS username FROM users` |
+| `INVALID_NESTING` | Invalidate subquery structure or nesting | `SELECT name, COUNT(id) FROM users GROUP BY name` | `SELECT name, MAX(COUNT(id)) FROM users GROUP BY name` |
+| `TYPE_INCOMPATIBILITY` | Forces operation between mismatched types (e.g. VARCHAR = INT) | `SELECT name FROM users WHERE name = 'John'` | `SELECT name FROM users WHERE (name = 1234)` |
+| `COMPARISON_WITH_NULL` | Mutates comparison operators against NULL | `SELECT name FROM users WHERE age = 30` | `SELECT name FROM users WHERE (age = NULL)` |
+| `NON_BOOLEAN_WHERE` | Inserts non-boolean expression in WHERE | `SELECT name FROM users WHERE age = 30` | `SELECT name FROM users WHERE 'id_value'` |
+| `JOIN_ON_TRUE` | Injects `ON TRUE` / `ON 1=1` for joins | `SELECT users.name, orders.amount FROM users INNER JOIN orders ON users.id = orders.user_id` | `SELECT users.name, orders.amount FROM users INNER JOIN orders ON TRUE` |
+| `WRONG_AGGREGATION` | Swaps aggregator functions (e.g., `SUM` $\rightarrow$ `AVG`) | `SELECT MAX(age), SUM(id) FROM users` | `SELECT MIN(age), AVG(id) FROM users` |
+| `JOIN_TYPE_MUTATION` | Changes join type (e.g., `INNER` $\rightarrow$ `LEFT`) | `SELECT users.name, orders.amount FROM users INNER JOIN orders ON users.id = orders.user_id` | `SELECT users.name, orders.amount FROM users LEFT JOIN orders ON (users.id = orders.user_id)` |
+| `LOGICAL_OPERATOR_SWAP` | Swaps `AND` $\leftrightarrow$ `OR`, or `NOT` | `SELECT name FROM users WHERE age > 20 AND name = 'John'` | `SELECT name FROM users WHERE ((age > 20) OR (name = 'John'))` |
+| `COMPARISON_OPERATOR_SWAP`| Swaps comparison operators (e.g. `=` $\leftrightarrow$ `!=`) | `SELECT name, age FROM users WHERE age = 30` | `SELECT name, age FROM users WHERE (age != 30)` |
+| `UNNECESSARY_JOIN` | Injects an unrelated table join | `SELECT name FROM users` | `SELECT name FROM users INNER JOIN orders ON TRUE` |
+| `WILDCARD_HALLUCINATION` | Injects incorrect wildcards into queries | `SELECT name, age FROM users` | `SELECT * FROM users` |
+| `DISTINCT_MUTATION` | Adds or removes the `DISTINCT` keyword | `SELECT name FROM users` | `SELECT DISTINCT name FROM users` |
+| `HAVING_CLAUSE_MUTATION` | Modifies `HAVING` clause expressions | `SELECT name, COUNT(id) FROM users GROUP BY name HAVING COUNT(id) > 5` | `SELECT name, COUNT(id) FROM users WHERE (COUNT(id) > 5) GROUP BY name` |
+| `ORDER_BY_DIRECTION_SWAP` | Inverts `ASC` $\leftrightarrow$ `DESC` | `SELECT name FROM users ORDER BY age ASC` | `SELECT name FROM users ORDER BY age DESC` |
+| `MISSING_WHERE_CLAUSE` | Removes `WHERE` clauses from queries | `SELECT name FROM users WHERE age = 30` | `SELECT name FROM users` |
+| `LIMIT_MUTATION` | Modifies or deletes `LIMIT` values | `SELECT name FROM users LIMIT 5` | `SELECT name FROM users` |
+| `MATH_OPERATOR_SWAP` | Swaps math operators (e.g. `+` $\leftrightarrow$ `-`) | `SELECT name FROM users WHERE age + 5 = 30` | `SELECT name FROM users WHERE ((age - 5) = 30)` |
+| `LIKE_TO_EQUALS_SWAP` | Swaps `LIKE` operator to `=` | `SELECT name FROM users WHERE name LIKE 'J%'` | `SELECT name FROM users WHERE (name = 'J%')` |
+| `UNION_ALL_MUTATION` | Mutates `UNION` $\leftrightarrow$ `UNION ALL` | `SELECT name FROM users UNION SELECT name FROM orders` | `SELECT name FROM users UNION ALL SELECT name FROM orders` |
+| `IN_TO_EQUALS` | Converts `IN (...)` expression to `=` | `SELECT name FROM users WHERE id IN (SELECT user_id FROM orders)` | `SELECT name FROM users WHERE (id = (SELECT user_id FROM orders))` |
+| `IS_NULL_INVERSION` | Swaps `IS NULL` $\leftrightarrow$ `IS NOT NULL` | `SELECT name FROM users WHERE age IS NULL` | `SELECT name FROM users WHERE age IS NOT NULL` |
+| `BETWEEN_REVERSAL` | Reverses bounds in `BETWEEN` statements | `SELECT name FROM users WHERE age BETWEEN 10 AND 50` | `SELECT name FROM users WHERE age BETWEEN 50 AND 10` |
+| `EXISTS_INVERSION` | Inverts `EXISTS` to `NOT EXISTS` | `SELECT name FROM users WHERE EXISTS (SELECT user_id FROM orders WHERE orders.user_id = users.id)` | `SELECT name FROM users WHERE NOT (EXISTS (SELECT user_id FROM orders WHERE (orders.user_id = users.id)))` |
+| `STRING_FUNCTION_MUTATION`| Mutates string manipulation functions | `SELECT UPPER(name) FROM users` | `SELECT LOWER(name) FROM users` |
+| `IN_INVERSION` | Swaps `IN` $\leftrightarrow$ `NOT IN` | `SELECT name FROM users WHERE id IN (1, 2, 3)` | `SELECT name FROM users WHERE NOT (id IN (1, 2, 3))` |
+| `OUTER_JOIN_DIRECTION_SWAP`| Swaps `LEFT` $\leftrightarrow$ `RIGHT` join direction | `SELECT users.name, orders.amount FROM users LEFT JOIN orders ON users.id = orders.user_id` | `SELECT users.name, orders.amount FROM users RIGHT JOIN orders ON (users.id = orders.user_id)` |
+| `AGGREGATE_DISTINCT_MUTATION`| Injects or removes `DISTINCT` within aggregates | `SELECT COUNT(DISTINCT name) FROM users` | `SELECT COUNT(name) FROM users` |
+| `OFFSET_MUTATION` | Modifies or deletes `OFFSET` values | `SELECT name FROM users LIMIT 5 OFFSET 2` | `SELECT name FROM users LIMIT 5` |
+| `SET_OPERATION_SWAP` | Swaps set operators (`UNION`, `EXCEPT`, `INTERSECT`) | `SELECT name FROM users INTERSECT SELECT name FROM orders` | `SELECT name FROM users EXCEPT SELECT name FROM orders` |
+| `CASE_CONDITION_SWAP` | Mutates conditions inside `CASE WHEN` clauses | `SELECT CASE age WHEN 18 THEN name ELSE 'adult' END FROM users` | `SELECT CASE age WHEN 18 THEN 'adult' ELSE name END FROM users` |
 
 ---
 
