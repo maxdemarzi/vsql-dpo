@@ -10,7 +10,7 @@
 
 ## Registered Functions
 
-The extension exposes two main query corruption functions:
+The extension exposes the following functions:
 
 ### 1. `vsql_corrupt(query, corruption_type, schema_or_db_name)`
 Applies a corruption to the specified SQL query. All three arguments are required.
@@ -19,9 +19,9 @@ Applies a corruption to the specified SQL query. All three arguments are require
 - **`schema_or_db_name`** (STRING): Either a schema definition string (containing a `:` character) or a database name.
 - **Returns**: A corrupted SQL query string.
 
-### 2. `vsql_corrupt_with_schema(query, corruption_type, schema_or_db_name)`
-Equivalent to `vsql_corrupt`. All three arguments are required.
-- **Returns**: A corrupted SQL query string.
+### 2. `vsql_schema_cache_ready()`
+Checks if the background schema cache has been populated.
+- **Returns**: `1` (INT) if the schema cache contains at least one database, or `0` (INT) otherwise.
 
 ---
 
@@ -45,7 +45,19 @@ The extension resolves the database schema structure from the third parameter `s
    ```
 
 2. **Dynamic Database Lookup**:
-   If the parameter does *not* contain a colon `:`, it is treated as a MySQL database name. The extension queries the local MySQL instance's `INFORMATION_SCHEMA.COLUMNS` to dynamically load the schema:
+   If the parameter does *not* contain a colon `:`, it is treated as a MySQL database name. The database schema must be fetched and cached by a background worker thread.
+   
+   To enable the background worker thread, set the global variable:
+   ```sql
+   SET GLOBAL vsql_corruptor.schema_cache_enabled = ON;
+   ```
+   
+   You can verify if the background worker has finished fetching and populating the schema cache by calling:
+   ```sql
+   SELECT vsql_schema_cache_ready(); -- Returns 1 if populated, 0 otherwise
+   ```
+   
+   Example:
    ```sql
    SELECT vsql_corrupt(
      'SELECT first_name FROM customers WHERE id = 30',

@@ -33,13 +33,16 @@ SELECT first_name FROM customers WHERE (first_name = 1234)
 SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap;
 custom_schema_swap
 SELECT first_name FROM customers WHERE (first_name = 1234)
-SELECT vsql_corrupt_with_schema('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap_explicit_db;
+SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'customers:first_name VARCHAR,id INT') AS custom_schema_swap_explicit_db;
 custom_schema_swap_explicit_db
 SELECT first_name FROM customers WHERE (first_name = 1234)
 SELECT vsql_corrupt('SELECT name FROM users', 'INVALID_TYPE_NAME', 'customers:first_name VARCHAR,id INT');
 ERROR HY000: VDF error in function 'vsql_corrupt': Invalid corruption type specified
 SELECT vsql_corrupt('SELECT name FROM users', 'RANDOM', 'non_existent_db');
 ERROR HY000: VDF error in function 'vsql_corrupt': Database 'non_existent_db' does not exist
+SELECT vsql_corrupt('SELECT first_name FROM customers WHERE first_name = \'Alice\'', 'TYPE_INCOMPATIBILITY', 'test_corrupt_db') AS db_schema_swap;
+db_schema_swap
+SELECT first_name FROM customers WHERE (first_name = 1234)
 #
 # Cleanup
 #

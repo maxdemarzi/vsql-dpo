@@ -16,6 +16,7 @@
 
 #include <villagesql/vsql.h>
 #include <villagesql/preview/sql_query.h>
+#include <villagesql/preview/thread_worker.h>
 #include "CorruptionEngine.h"
 #include <string>
 #include <optional>
@@ -25,14 +26,97 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <shared_mutex>
+#include <mutex>
 
 using namespace vsql;
-
-extern void *thd_get_current_thd();
 
 static vsql::preview_sql_query::SqlQueryCapability g_sql_query_cap;
 
 namespace {
+
+std::shared_mutex g_schema_cache_mutex;
+std::unordered_map<std::string, schema::MySQLSchema> g_schema_cache;
+
+void updateSchemaCache(struct vef_thread_handle_t *handle) {
+    auto session = g_sql_query_cap.open(handle);
+    if (!session) {
+        return;
+    }
+
+    std::string sql = "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_KEY "
+                      "FROM INFORMATION_SCHEMA.COLUMNS "
+                      "ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION";
+
+    auto result = session.sql(sql).execute();
+    if (!result || result.has_error()) {
+        return;
+    }
+
+    std::unordered_map<std::string, std::vector<schema::MySQLTable>> temp_tables_by_db;
+
+    std::string current_db = "";
+    std::string current_table = "";
+    std::vector<schema::MySQLColumn> current_columns;
+
+    auto save_current_table = [&]() {
+        if (!current_db.empty() && !current_table.empty() && !current_columns.empty()) {
+            temp_tables_by_db[current_db].push_back({current_table, current_columns});
+        }
+        current_columns.clear();
+    };
+
+    while (result.next()) {
+        std::string_view db_name_sv = result.column_str(0);
+        std::string_view table_name_sv = result.column_str(1);
+        std::string_view col_name_sv = result.column_str(2);
+        std::string_view data_type_sv = result.column_str(3);
+        std::string_view col_key_sv = result.column_str(4);
+
+        if (db_name_sv.empty() || table_name_sv.empty() || col_name_sv.empty() || data_type_sv.empty()) {
+            continue;
+        }
+
+        std::string db_name(db_name_sv);
+        std::string table_name(table_name_sv);
+        std::string col_name(col_name_sv);
+        std::string data_type(data_type_sv);
+        std::string col_key(col_key_sv);
+
+        std::transform(data_type.begin(), data_type.end(), data_type.begin(), ::toupper);
+        bool is_pri = (col_key == "PRI");
+
+        if (db_name != current_db || table_name != current_table) {
+            save_current_table();
+            current_db = db_name;
+            current_table = table_name;
+        }
+        current_columns.push_back({col_name, data_type, is_pri});
+    }
+    save_current_table();
+
+    std::unique_lock<std::shared_mutex> lock(g_schema_cache_mutex);
+    g_schema_cache.clear();
+    for (auto& [db_name, tables] : temp_tables_by_db) {
+        g_schema_cache[db_name] = schema::MySQLSchema(tables);
+    }
+}
+
+vef_next_wakeup_t schema_cache_worker(vef_wakeup_reason_t reason,
+                                      struct vef_thread_handle_t *handle,
+                                      void *) {
+    if (reason == VEF_WAKEUP_ENABLE) {
+        return {1, -1};
+    }
+    if (reason == VEF_WAKEUP_DISABLE) {
+        return {};
+    }
+    if (reason == VEF_WAKEUP_PERIODIC) {
+        updateSchemaCache(handle);
+        return {5000, -1};
+    }
+    return {};
+}
 
 std::optional<CorruptionEngine::CorruptionType> parseCorruptionType(std::string_view name) {
     static const std::unordered_map<std::string_view, CorruptionEngine::CorruptionType> mapping = {
@@ -133,100 +217,14 @@ schema::MySQLSchema getSchemaFromMySQL(std::string_view db_name, std::string& er
         }
     }
 
-    // Check if the database directory exists under the data directory
-    if (!std::filesystem::is_directory(db_str)) {
-        err_msg = "Database '" + db_str + "' does not exist";
-        return schema::MySQLSchema();
+    std::shared_lock<std::shared_mutex> lock(g_schema_cache_mutex);
+    auto it = g_schema_cache.find(db_str);
+    if (it != g_schema_cache.end()) {
+        return it->second;
     }
 
-    void *thd = thd_get_current_thd();
-    if (!thd) {
-        err_msg = "No current THD context available in this thread";
-        return schema::MySQLSchema();
-    }
-
-    struct vef_thread_handle_t {
-        void *thd;
-    } mock_handle;
-    mock_handle.thd = thd;
-
-    auto session = g_sql_query_cap.open(reinterpret_cast<::vef_thread_handle_t *>(&mock_handle));
-    if (!session) {
-        err_msg = "Failed to open SQL session using preview::sql_query capability";
-        return schema::MySQLSchema();
-    }
-
-    std::string escaped_db;
-    for (char c : db_str) {
-        if (c == '\'') escaped_db += "\\'";
-        else escaped_db += c;
-    }
-
-    // Check if the database exists
-    std::string check_sql = "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '" + escaped_db + "'";
-    auto check_result = session.sql(check_sql).execute();
-    if (!check_result || check_result.has_error()) {
-        err_msg = "SQL Query failed: " + std::string(check_result ? check_result.error().message : "unknown error");
-        return schema::MySQLSchema();
-    }
-    if (!check_result.next()) {
-        err_msg = "Database '" + db_str + "' does not exist";
-        return schema::MySQLSchema();
-    }
-
-    std::string sql = "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_KEY "
-                      "FROM INFORMATION_SCHEMA.COLUMNS "
-                      "WHERE TABLE_SCHEMA = '" + escaped_db + "' "
-                      "ORDER BY TABLE_NAME, ORDINAL_POSITION";
-
-    auto result = session.sql(sql).execute();
-    if (!result || result.has_error()) {
-        err_msg = "SQL Query failed: " + std::string(result.error().message);
-        return schema::MySQLSchema();
-    }
-
-    std::vector<schema::MySQLTable> tables;
-    std::string current_table_name = "";
-    std::vector<schema::MySQLColumn> current_columns;
-
-    while (result.next()) {
-        std::string_view table_name_sv = result.column_str(0);
-        std::string_view col_name_sv = result.column_str(1);
-        std::string_view data_type_sv = result.column_str(2);
-        std::string_view col_key_sv = result.column_str(3);
-
-        if (table_name_sv.empty() || col_name_sv.empty() || data_type_sv.empty()) {
-            continue;
-        }
-
-        std::string table_name(table_name_sv);
-        std::string col_name(col_name_sv);
-        std::string data_type(data_type_sv);
-        std::string col_key(col_key_sv);
-
-        std::transform(data_type.begin(), data_type.end(), data_type.begin(), ::toupper);
-        bool is_pri = (col_key == "PRI");
-
-        if (table_name != current_table_name) {
-            if (!current_table_name.empty()) {
-                tables.push_back({current_table_name, current_columns});
-                current_columns.clear();
-            }
-            current_table_name = table_name;
-        }
-        current_columns.push_back({col_name, data_type, is_pri});
-    }
-
-    if (!current_table_name.empty()) {
-        tables.push_back({current_table_name, current_columns});
-    }
-
-    if (tables.empty()) {
-        err_msg = "No tables found in database schema for '" + db_str + "'";
-        return schema::MySQLSchema();
-    }
-
-    return schema::MySQLSchema(tables);
+    err_msg = "Database '" + db_str + "' does not exist";
+    return schema::MySQLSchema();
 }
 
 schema::MySQLSchema resolveSchema(std::string_view schema_or_db, std::string& err_msg) {
@@ -283,6 +281,14 @@ CorruptionEngine::CorruptionType getRandomCorruptionType() {
 
 } // namespace
 
+static vsql::preview_thread_worker::ThreadWorkerCapability<&schema_cache_worker>
+    g_thread_worker_cap{"schema_cache"};
+
+void vsql_schema_cache_ready_impl(IntResult out) {
+    std::shared_lock<std::shared_mutex> lock(g_schema_cache_mutex);
+    out.set(!g_schema_cache.empty() ? 1 : 0);
+}
+
 void vsql_corrupt_impl(StringArg query, StringArg corruption_type, StringArg schema_or_db, StringResult out) {
     if (query.is_null() || schema_or_db.is_null()) {
         out.set_null();
@@ -327,51 +333,11 @@ void vsql_corrupt_impl(StringArg query, StringArg corruption_type, StringArg sch
     out.set_length(corrupted.length());
 }
 
-void vsql_corrupt_with_schema_impl(StringArg query, StringArg corruption_type, StringArg schema_or_db, StringResult out) {
-    if (query.is_null() || schema_or_db.is_null()) {
-        out.set_null();
-        return;
-    }
-
-    std::string query_val(query.value());
-    std::string schema_or_db_val(schema_or_db.value());
-    std::string corruption_type_val = corruption_type.is_null() ? "" : std::string(corruption_type.value());
-
-    CorruptionEngine::CorruptionType type = getRandomCorruptionType();
-    if (!corruption_type_val.empty()) {
-        if (corruption_type_val != "RANDOM") {
-            auto parsed_type = parseCorruptionType(corruption_type_val);
-            if (!parsed_type) {
-                out.error("Invalid corruption type specified");
-                return;
-            }
-            type = *parsed_type;
-        }
-    }
-
-    std::string err_msg;
-    schema::MySQLSchema schemaObj = resolveSchema(schema_or_db_val, err_msg);
-    if (!err_msg.empty()) {
-        out.error(err_msg.c_str());
-        return;
-    }
-
-    CorruptionEngine engine(schemaObj);
-    std::string corrupted = engine.applyCorruption(query_val, type);
-
-    auto buf = out.buffer();
-    if (corrupted.length() > buf.size()) {
-        out.error("Resulting query exceeds buffer size");
-        return;
-    }
-
-    memcpy(buf.data(), corrupted.c_str(), corrupted.length());
-    out.set_length(corrupted.length());
-}
 
 VEF_GENERATE_ENTRY_POINTS(
   make_extension()
     .with(g_sql_query_cap)
+    .with(g_thread_worker_cap)
     .func(make_func<&vsql_corrupt_impl>("vsql_corrupt")
       .returns(STRING)
       .param(STRING)
@@ -379,12 +345,9 @@ VEF_GENERATE_ENTRY_POINTS(
       .param(STRING)
       .buffer_size(65535)
       .build())
-    .func(make_func<&vsql_corrupt_with_schema_impl>("vsql_corrupt_with_schema")
-      .returns(STRING)
-      .param(STRING)
-      .param(STRING)
-      .param(STRING)
-      .buffer_size(65535)
+    .func(make_func<&vsql_schema_cache_ready_impl>("vsql_schema_cache_ready")
+      .returns(INT)
+      .no_params()
       .build())
 )
 
